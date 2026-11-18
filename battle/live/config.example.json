@@ -1,0 +1,7 @@
+{
+  "provider": "mock",
+  "mock_reply": "",
+  "decision_interval_secs": 3.0,
+  "max_calls_per_match": 60,
+  "system_prompt": ""
+}
