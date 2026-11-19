@@ -1,0 +1,12 @@
+{
+  "provider": "mock",
+  "mock_reply": "",
+  "decision_interval_secs": 3.0,
+  "max_calls_per_match": 60,
+  "system_prompt": "",
+  "agent": {
+    "history_len": 3,
+    "memory_max_chars": 1500,
+    "plan_enabled": true
+  }
+}

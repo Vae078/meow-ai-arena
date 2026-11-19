@@ -1,0 +1,14 @@
+# 构建产物
+engine/build/
+engine/third_party/
+workspace/build/
+workspace/war.exe
+
+# LLM 桥接运行时产物
+live/out/
+live/__pycache__/
+__pycache__/
+*.pyc
+
+# 本地 AI 配置（含 api_key），切勿提交
+live/*.local.json
