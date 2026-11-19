@@ -275,6 +275,7 @@ struct World::Impl {
     std::vector<float> zoneCost, aliveCostEnd;
     std::vector<double> rankPts, killPts, score;
     std::vector<float> objScore;   // 据点累计得分（每队）
+    std::vector<float> res;        // 增援点（每队，买组用）
     std::vector<int> rank;
 
     // 座位
@@ -2359,6 +2360,7 @@ struct World::Impl {
     // 据点计分：每个 score>0 的据点，归"区域内造价最多"的一方，每回合给它加分
     void scorePoints() {
         if (objScore.empty()) objScore.assign(size_t(nteams), 0.0f);
+        if (res.empty()) res.assign(size_t(nteams), 0.0f);
         for (const Zone& z : sc.zones) {
             if (z.score_rate <= 0) continue;
             std::vector<float> cost(size_t(nteams), 0.0f);
@@ -2371,7 +2373,22 @@ struct World::Impl {
             float best = 0;
             for (int t = 0; t < nteams; ++t)
                 if (cost[size_t(t)] > best + 1e-3f) { best = cost[size_t(t)]; owner = t; }
-            if (owner >= 0) objScore[size_t(owner)] += z.score_rate;
+            if (owner >= 0) { objScore[size_t(owner)] += z.score_rate; res[size_t(owner)] += 40.0f; }
+        }
+    }
+
+    // 买组：在基地出生一组兵（编队散开）
+    void spawnSquad(int seat, int kind) {
+        const SeatDef& S0 = sc.seats[size_t(seat)];
+        const int n = squad_size(kind);
+        const int side = std::max(1, int(std::sqrt(float(n))));
+        for (int i = 0; i < n; ++i) {
+            const int r = i / side, c = i % side;
+            const float dx = (c - (side - 1) * 0.5f) * 1.5f;
+            const float dz = (r - (side - 1) * 0.5f) * 1.5f;
+            float wx, wz;
+            S0.to_world(dx, dz, wx, wz);
+            addUnit(kind, seat, seat, wx, wz, S0.yaw, -1000, "");
         }
     }
 
@@ -2759,6 +2776,10 @@ struct World::Impl {
             o += ' ';
             putInt(o, int(t < int(objScore.size()) ? objScore[size_t(t)] : 0));
         }
+        for (int t = 0; t < nteams; ++t) {  // 每队增援点
+            o += ' ';
+            putInt(o, int(t < int(res.size()) ? res[size_t(t)] : 0));
+        }
         o += "\nU ";
         int n = 0;
         for (size_t i = 0; i < U.size(); ++i) if (vis[i]) ++n;
@@ -2921,7 +2942,7 @@ struct World::Impl {
                 if (std::llabs(op.a) > 100000000 || std::llabs(op.b) > 100000000) return "坐标太大";
             } else if (k == 'A' || k == 'U') {
                 if (!readInt(op.a)) return std::string("指令 ") + k + " 缺目标编号";
-            } else if (k != 'H' && k != 'F' && k != 'D') return std::string("看不懂的指令 ") + k;
+            } else if (k != 'H' && k != 'F' && k != 'D' && k != 'B') return std::string("看不懂的指令 ") + k;
             ops.push_back(op);
             if (ops.size() > 5000) return "一回合的指令太多";
         }
@@ -2934,6 +2955,15 @@ struct World::Impl {
         const std::string err = parseOrders(line, ops);
         if (!err.empty()) return err;
         for (const Op& op : ops) {
+            if (op.k == 'B') {  // 买组：B <兵种>，不是对某个兵下令
+                const int kind = int(op.id);
+                if (kind < 0 || kind >= NKIND || squad_size(kind) <= 0) { ++ignored; continue; }
+                const float cost = squad_size(kind) * DEFS[kind].cost;
+                if (seat < 0 || seat >= int(res.size()) || res[size_t(seat)] < cost) { ++ignored; continue; }
+                res[size_t(seat)] -= cost;
+                spawnSquad(seat, kind);
+                continue;
+            }
             if (op.id <= 0 || op.id >= (long long)objs.size() || objs[size_t(op.id)].type != OT_UNIT) { ++ignored; continue; }
             Unit& u = U[size_t(objs[size_t(op.id)].idx)];
             if (u.seat != seat || !u.alive()) { ++ignored; continue; }

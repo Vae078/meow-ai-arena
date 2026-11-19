@@ -15,7 +15,7 @@ LLM 输出：先写决策思路（中文，若干行），再逐行输出指令�
 import protocol as P
 import squads
 
-COMMAND_OPS = {"move", "movestraight", "attack", "hold", "free", "aim", "detonate", "push"}
+COMMAND_OPS = {"move", "movestraight", "attack", "hold", "free", "aim", "detonate", "push", "buy"}
 
 
 def parse_llm(text, tick, init):
@@ -113,6 +113,12 @@ def parse_llm(text, tick, init):
                     continue
                 for uid in src:
                     tokens.append(f"U {uid} {tgt[0]}")
+            elif op == "buy":
+                s = parts[1]
+                if s not in P.KIND_EN:
+                    errors.append(f"buy: 不认识的兵种 {s}")
+                    continue
+                tokens.append(f"B {P.KIND_EN.index(s)}")
         except (ValueError, IndexError):
             errors.append(f"解析失败：{line}")
     return tokens, errors, reasoning

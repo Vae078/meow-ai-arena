@@ -73,6 +73,22 @@ inline float vision_of(int kind) {
     }
 }
 
+// 每组的满编人数（买组时一次出多少兵）。boss/lord 不可买，返回 0。
+inline int squad_size(int kind) {
+    switch (kind) {
+        case K_MILITIA: return 12;
+        case K_SHIELD: return 8;
+        case K_SPEAR: return 8;
+        case K_ARCHER: return 12;
+        case K_CAV: return 6;
+        case K_HAMMER: return 6;
+        case K_BOMBER: return 6;
+        case K_CATAPULT: return 2;
+        case K_GIANT: return 1;
+        default: return 0;
+    }
+}
+
 // 规则常数（秒、米、米/秒）
 struct Rules {
     // 阵亡与倒地

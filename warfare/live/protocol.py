@@ -190,6 +190,7 @@ class TickState:
         self.flying = []      # list[Flying]
         self.ghosts = []      # list[Ghost]
         self.score = []       # 每队据点累计得分
+        self.res = []         # 每队增援点
 
 
 def _readline(fin):
@@ -301,7 +302,9 @@ def parse_tick(fin, init):
     st.time = step / float(init.hz)
     wl = int(p[3])
     st.water = -1e9 if wl == -99999 else wl / 100.0
-    st.score = [int(x) for x in p[4:]]  # 每队据点累计得分
+    nt = init.teams
+    st.score = [int(x) for x in p[4:4 + nt]]          # 每队据点累计得分
+    st.res = [int(x) for x in p[4 + nt:4 + 2 * nt]]   # 每队增援点
 
     # U 单位
     line = _readline(fin)

@@ -37,6 +37,9 @@ def build_summary(init, st):
         mine = st.score[init.seat] if init.seat < len(st.score) else 0
         other = sum(st.score) - mine
         lines.append(f"得分：我 {mine} : 敌 {other}")
+    if st.res:
+        my_res = st.res[init.seat] if init.seat < len(st.res) else 0
+        lines.append(f"增援点：我 {my_res}（可 buy 组）")
 
     # 目标
     if init.mode == "duel":
@@ -117,6 +120,7 @@ DEFAULT_SYSTEM_PROMPT = """你是《纸上谈兵》的指挥官，指挥一队�
   aim <兵种> <x> <z>        整组朝地点盲射（弓手/投石车）
   detonate <兵种>           整组引爆（炮仗兵）
   push <兵种> <雪球编号>     整组推雪球
+  buy <兵种>                花增援点在基地买一整组（满编）
 
 「兵种」用英文名：militia(新兵) shield(盾卫) spear(长枪兵) archer(弓手) cavalry(骑兵) hammer(大锤) bomber(炮仗兵) catapult(投石车) giant(大块头) boss(镇山兽) lord(主帅)；也可以填单个兵编号精确指挥。
 
