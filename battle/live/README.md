@@ -19,7 +19,26 @@ python battle/live/run_live.py \
   -o battle/live/out
 ```
 
+`--ai` 两个位置各是一个「指挥官」，可以是：
+
+- AI 配置 `.json`（LLM 桥接，见下）
+- 确定性程序 `.cpp`（自动编译成 exe 再用）或 `.exe`
+- `-`（不用程序，按布阵姿态 + 默认行为打）
+
+所以 AI 对确定性程序只需把一个位置换成 `.cpp` / `.exe`：
+
+```bash
+# 甲方 AI、乙方确定性程序（gpt-6.2-sol 的 commander.cpp）
+python battle/live/run_live.py \
+  --map 樱丘 \
+  --deploy battle/bots/gpt-6.2-sol/duel.json battle/bots/gpt-6.2-sol/duel.json \
+  --ai 甲.json battle/bots/gpt-6.2-sol/commander.cpp \
+  -o battle/live/out
+```
+
 跑完输出：`out/result.json`（胜负）、`out/replays/last.wrp`（回放，可 `python battle/workspace/play.py replay` 复盘或 renderer 出片）、`out/logs/`（每边决策轨迹）。
+
+注意：确定性程序每个物理 tick（0.1 秒）都能响应，AI 每 `decision_interval_secs` 秒才决策一次，二者节奏天然不同；想公平比较，可把 AI 的决策间隔调小（受 `max_calls_per_match` 和 API 速度限制）。
 
 ## AI 配置（每边一份 json）
 

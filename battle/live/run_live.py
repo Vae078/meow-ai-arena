@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""入口：跑一场 AI 实时对战（1v1，两个 AI 桥接座位）。
+"""入口：跑一场 1v1 对战，两个座位的指挥官各配一种。
+
+每个座位可以是 AI 桥接（LLM），也可以是编译好的确定性程序（.cpp/.exe），或不用程序（-）。
 
 用法：
-  python run_live.py --map 樱丘 --deploy 甲.json 乙.json --ai 甲配置.json 乙配置.json [-o out/]
+  python run_live.py --map 樱丘 --deploy 甲.json 乙.json --ai 甲.json 乙.json [-o out/]     AI vs AI
+  python run_live.py --map 樱丘 --deploy 甲.json 乙.json --ai 甲.json commander.cpp          AI vs 确定性程序
 """
 import argparse
 import json
@@ -15,6 +18,8 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 WAR = REPO / "battle" / "workspace" / "war.exe"
 MAPS = REPO / "battle" / "workspace" / "maps"
+sys.path.insert(0, str(REPO / "battle" / "workspace"))
+import build  # noqa: E402  编译确定性指挥官 .cpp 用
 
 
 def resolve_map(name):
@@ -33,6 +38,32 @@ def ai_cmd(config_path):
     return f"cmd:{python} -u {script} --config {config_path}"
 
 
+def resolve_commander(spec):
+    """一个座位的指挥官 -> 传给 war.exe 的 --cmd。
+
+    - '-'           不用程序（布阵姿态 + 默认行为）
+    - '*.json'      AI 配置，接 ai_commander.py（LLM 桥接）
+    - '*.cpp'       编译成 exe 再用（确定性程序）
+    - '*.exe'       直接用
+    """
+    spec = str(spec)
+    if spec == "-":
+        return "-"
+    p = Path(spec).resolve()
+    if not p.is_file():
+        sys.exit(f"找不到指挥官：{spec}")
+    if p.suffix.lower() == ".json":
+        return ai_cmd(str(p))
+    if p.suffix.lower() == ".cpp":
+        exe, err = build.build(p)
+        if err:
+            sys.exit(err)
+        return str(exe)
+    if p.suffix.lower() == ".exe":
+        return str(p)
+    sys.exit(f"不认识的指挥官（要 .json / .cpp / .exe 或 -）：{spec}")
+
+
 def main():
     for s in (sys.stdout, sys.stderr):
         try:
@@ -42,7 +73,8 @@ def main():
     ap = argparse.ArgumentParser(description="AI 实时对战（1v1）")
     ap.add_argument("--map", default="樱丘")
     ap.add_argument("--deploy", nargs=2, required=True, help="两份布阵 json（甲 乙）")
-    ap.add_argument("--ai", nargs=2, required=True, help="两份 AI 配置 json（甲 乙）")
+    ap.add_argument("--ai", nargs=2, required=True,
+                    help="两个座位的指挥官（甲 乙）：AI 配置 .json，或确定性程序 .cpp/.exe，或 - 不用程序")
     ap.add_argument("-o", "--out", default=str(HERE / "out"))
     args = ap.parse_args()
 
@@ -51,7 +83,7 @@ def main():
 
     mapf = resolve_map(args.map)
     deploy = [str(Path(x).resolve()) for x in args.deploy]
-    config = [str(Path(x).resolve()) for x in args.ai]
+    cmds = [resolve_commander(x) for x in args.ai]
 
     out = Path(args.out)
     replay_dir = out / "replays"
@@ -63,7 +95,7 @@ def main():
 
     cmd = [str(WAR), "run", str(mapf),
            "--deploy", deploy[0], "--deploy", deploy[1],
-           "--cmd", ai_cmd(config[0]), "--cmd", ai_cmd(config[1]),
+           "--cmd", cmds[0], "--cmd", cmds[1],
            "--wall-ms", "180000", "--first-wall-ms", "180000",
            "--max-timeouts", "0", "--match-wall-s", "0",
            "--replay", str(replay), "--json", str(result),
