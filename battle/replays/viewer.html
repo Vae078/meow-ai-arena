@@ -1,0 +1,652 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>纸上谈兵 · 回放查看器</title>
+<style>
+:root{--bg:#f4f5f7;--panel:#fff;--ink:#1f2328;--mute:#6b7280;--line:#d8dce2;--acc:#2563eb;--bad:#dc2626;--good:#16a34a}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:13px/1.45 "Microsoft YaHei","PingFang SC",system-ui,sans-serif}
+#app{display:grid;grid-template-columns:1fr 330px;grid-template-rows:auto 1fr auto;height:100vh}
+#bar{grid-column:1/3;display:flex;gap:8px;align-items:center;padding:6px 10px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+#bar button,#bar select{font:inherit;padding:3px 9px;border:1px solid var(--line);border-radius:5px;background:#fff;cursor:pointer}
+#bar button:hover{border-color:var(--acc)}
+#bar label{display:flex;align-items:center;gap:3px;color:var(--mute);cursor:pointer;user-select:none}
+#bar .sep{width:1px;height:20px;background:var(--line)}
+#title{font-weight:600;margin-right:6px}
+#tlabel{font-variant-numeric:tabular-nums;min-width:120px;color:var(--mute)}
+#stage{position:relative;overflow:hidden;background:#eef1f5}
+#cv{position:absolute;inset:0;width:100%;height:100%;cursor:crosshair}
+#tip{position:absolute;pointer-events:none;background:rgba(20,24,30,.92);color:#fff;padding:5px 8px;border-radius:6px;font-size:12px;white-space:pre;display:none;z-index:5}
+#side{grid-row:2/4;grid-column:2;overflow:auto;background:var(--panel);border-left:1px solid var(--line);padding:10px 12px}
+#side h3{margin:14px 0 6px;font-size:13px;color:var(--mute);font-weight:600}
+#side h3:first-child{margin-top:0}
+#score{display:grid;gap:6px}
+#score .team{display:grid;grid-template-columns:12px 1fr auto;gap:8px;align-items:center;background:#f7f8fa;border-radius:6px;padding:5px 8px}
+#score .sw{width:12px;height:100%;border-radius:3px}
+#score .nm{font-weight:600}
+#score .num{font-variant-numeric:tabular-nums;color:var(--mute)}
+#bars{display:grid;gap:5px}
+#bars .b{display:grid;grid-template-columns:44px 1fr 34px;gap:6px;align-items:center;font-size:12px}
+#bars .btrack{height:9px;background:#eceef2;border-radius:5px;overflow:hidden}
+#bars .bfill{height:100%;border-radius:5px}
+#result{white-space:pre-wrap;font-size:12px;background:#f7f8fa;border-radius:6px;padding:6px 8px}
+.ok{color:var(--good);font-weight:600}.bad{color:var(--bad);font-weight:600}
+#events{list-style:none;margin:0;padding:0;font-size:12px;max-height:40vh;overflow:auto}
+#events li{display:flex;gap:6px;padding:2px 4px;border-radius:4px;cursor:pointer;align-items:baseline}
+#events li:hover{background:#eef2ff}
+#events li.now{background:#fef3c7}
+#events .t{font-variant-numeric:tabular-nums;color:var(--mute);min-width:46px;text-align:right;flex:none}
+#legend{font-size:12px;color:var(--mute);line-height:1.8}
+#legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:3px}
+#tl{grid-column:1;height:44px;background:var(--panel);border-top:1px solid var(--line);cursor:pointer;display:block;width:100%}
+#drop{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;color:var(--mute);font-size:15px;background:#fafbfc;z-index:2}
+#drop.hover{background:#eef6ff}
+#drop .big{font-size:22px;color:var(--ink);font-weight:600}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="bar">
+    <span id="title">纸上谈兵 · 回放查看器</span>
+    <span class="sep"></span>
+    <button id="bPlay" title="空格">▶ 播放</button>
+    <button id="bPrev" title="←">◀</button>
+    <button id="bNext" title="→">▶|</button>
+    <select id="bSpeed" title="倍速">
+      <option value="0.25">0.25×</option>
+      <option value="0.5">0.5×</option>
+      <option value="1" selected>1×</option>
+      <option value="2">2×</option>
+      <option value="4">4×</option>
+    </select>
+    <span class="sep"></span>
+    <button id="bFit">适应</button>
+    <label><input type="checkbox" id="cGrid">网格</label>
+    <label><input type="checkbox" id="cTrail" checked>残影</label>
+    <span class="sep"></span>
+    <span id="tlabel">—</span>
+    <span style="flex:1"></span>
+    <span id="hint" style="color:var(--mute);font-size:12px">拖 .wrp 进来 · 空格播放 · 拖拽平移 · 滚轮缩放</span>
+  </div>
+  <div id="stage">
+    <canvas id="cv"></canvas>
+    <div id="drop"><div class="big">把 .wrp 回放拖进来</div><div>.wrp.xz 请先 python replays/unpack.py 解压</div></div>
+    <div id="tip"></div>
+  </div>
+  <canvas id="tl"></canvas>
+  <div id="side">
+    <h3>比分</h3>
+    <div id="score"></div>
+    <h3>关键单位</h3>
+    <div id="bars"></div>
+    <h3>结果</h3>
+    <div id="result">—</div>
+    <h3>事件</h3>
+    <ul id="events"></ul>
+    <h3>图例</h3>
+    <div id="legend"></div>
+  </div>
+</div>
+<script>
+"use strict";
+/* ---------------- 常量（和 workspace/play.py 一致） ---------------- */
+const TEAM_HEX = ["#2F6BFF", "#F0302C", "#18B45A", "#A64BF0"];
+const NEUTRAL = "#E8E2D6";
+const KIND_ZH = {militia:"新兵",shield:"盾卫",spear:"长枪兵",archer:"弓手",cavalry:"骑兵",hammer:"大锤",bomber:"炮仗兵",catapult:"投石车",giant:"大块头",boss:"镇山兽",lord:"主帅"};
+const KIND_CH = {militia:"m",shield:"s",spear:"p",archer:"a",cavalry:"c",hammer:"h",bomber:"b",catapult:"t",giant:"g",boss:"X",lord:"L"};
+const PROP_CH = {0:"O",1:"K",2:"F",3:"=",4:"=",5:"I"};
+const PROP_ZH = {snowball:"雪球",keg:"火药桶",flag:"军旗",barrier:"木栅",gate:"木栅门",pillar:"立石"};
+const OT = {1:"unit",2:"stone",3:"prop",4:"arrow"};
+const REASON_ZH = {"win:eliminate":"敌军全灭","win:destroy:镇山兽":"镇山兽被打倒","timeout_lose":"时间到，没有达成过关条件","eliminated":"我方全灭","lose:destroy:军旗":"军旗被打倒","lose:dead:主帅":"主帅阵亡","annihilation":"全歼","timeout_zone":"时间到，抢山头：比计分区造价","timeout_cost":"时间到，山头无兵：比全场剩余造价","timeout_draw":"时间到，山头和剩余造价都一样，平局","timeout":"时间到","engine_timeout":"引擎超时"};
+const WEAPON_ZH = {militia:"刀",shield:"刀",spear:"长枪",cavalry:"骑兵砍",hammer:"大锤",sweep:"大块头横扫",boss:"顶撞",dagger:"匕首",arrow:"箭",stone:"石头",explosion:"爆炸",charge:"骑兵冲锋",brace:"架枪",snowball:"雪球",boss_charge:"镇山兽冲撞",fell:"坠崖",drown:"淹死",explode:"自爆",topple:"被挤倒",prop:"道具"};
+// 材质名 -> 顶面颜色（简化的俯视配色）
+function matColor(m){
+  m = String(m||"");
+  if (m === "edge") return null;
+  if (m === "water" || m === "riverbed" || m === "seabed") return "#3A88C8";
+  if (m === "mud") return "#6E5034";
+  if (m === "sand" || m === "sand_wet") return "#DEBE7C";
+  if (m === "ice" || m === "ice_road" || m === "snow") return "#CCDDEE";
+  if (m === "rock" || m === "cliff" || m === "stone" || m === "crag" || m === "red_rock" || m === "stone_wall" || m === "wall" || m === "city_wall" || m === "rampart" || m === "masonry" || m === "rubble" || m === "stone_plateau") return "#C9C6BC";
+  if (m === "bridge" || m === "bridge_wood" || m === "plank" || m === "wood") return "#A07850";
+  if (m === "house") return "#D8603E";
+  if (m === "bell_tower" || m === "tower") return "#B84A34";
+  if (m === "pave" || m === "cobble" || m === "flagstone" || m === "street" || m === "stone_ramp") return "#CFC3A8";
+  if (m === "plateau") return "#C4BC8C";
+  if (m === "dirt_path" || m === "dirt" || m === "stone_ground") return "#C8A06A";
+  if (m === "tree" || m === "cherry_tree" || m === "pine" || m === "trunk") return "#5AAE5C";
+  return "#8FB667"; // 草地
+}
+
+/* ---------------- 全局状态 ---------------- */
+let R = null;                 // 解析结果
+let fpos = 0, playing = false, lastTs = 0;
+let view = {cx:0, cz:0, s:10};
+let hover = null;
+const $ = id => document.getElementById(id);
+const cv = $('cv'), ctx = cv.getContext('2d');
+const tl = $('tl'), tctx = tl.getContext('2d');
+const tip = $('tip');
+
+/* ---------------- .wrp 解析 ---------------- */
+function parseWrp(buf){
+  const dv = new DataView(buf), dec = new TextDecoder("utf-8");
+  const b = new Uint8Array(buf);
+  if (b.length < 11 || new TextDecoder().decode(b.slice(0,11)) !== "WARREPLAY1\n") throw new Error("不是回放文件（开头不是 WARREPLAY1）");
+  let pos = 11, meta = null, result = null;
+  const frames = [], events = [];
+  while (pos + 8 <= b.length){
+    const tag = String.fromCharCode(b[pos], b[pos+1], b[pos+2], b[pos+3]);
+    const n = dv.getUint32(pos+4, true);
+    const body = b.slice(pos+8, pos+8+n);
+    pos += 8 + n;
+    if (tag === "META") meta = JSON.parse(dec.decode(body));
+    else if (tag === "EVNT") events.push(...JSON.parse(dec.decode(body)));
+    else if (tag === "RSLT") result = JSON.parse(dec.decode(body));
+    else if (tag === "FRAM"){
+      const bd = new DataView(body.buffer, body.byteOffset, body.byteLength);
+      const step = bd.getUint32(0, true), cnt = bd.getUint32(4, true);
+      const recs = [];
+      for (let k = 0; k < cnt; k++){
+        const o = 8 + 32*k;
+        recs.push({id:bd.getUint32(o,true), ot:bd.getUint8(o+4), st:bd.getUint8(o+5), fl:bd.getUint8(o+6),
+                   team:bd.getUint8(o+7), hp:bd.getUint16(o+8,true), aux:bd.getUint16(o+10,true),
+                   x:bd.getFloat32(o+12,true), y:bd.getFloat32(o+16,true), z:bd.getFloat32(o+20,true)});
+      }
+      frames.push({step, recs});
+    }
+    else if (tag === "ENDR") break;
+  }
+  if (!meta) throw new Error("回放里没有 META");
+  const dt = meta.dt, fps = 1 / (dt * (meta.rec_every || 2));
+  const scenario = JSON.parse(meta.scenario);
+  // 物体信息：开场单位/道具；箭、石头按首帧 otype 推断
+  const info = {};
+  for (const o of (meta.objects || [])) info[o.id] = {kind:o.kind, type:o.type, team:o.team, hp:o.hp};
+  const firstSeen = {};
+  for (const f of frames) for (const r of f.recs){
+    if (info[r.id] == null && firstSeen[r.id] == null) firstSeen[r.id] = r;
+  }
+  for (const id in firstSeen){
+    const r = firstSeen[id];
+    const ot = OT[r.ot] || "unit";
+    let kind = ot;
+    if (ot === "unit") kind = "militia";
+    else if (ot === "prop") kind = ["snowball","keg","flag","barrier","gate","pillar"][r.aux] || "keg";
+    info[id] = {kind, type:ot, team:(r.team===255?-1:r.team), hp:0};
+  }
+  // 单位列表 + 造价表（比分牌用）
+  const cost = {};
+  for (const k in (meta.params && meta.params.units || {})) cost[k] = (meta.params.units[k].cost || 0);
+  const units = [];
+  for (const o of (meta.objects || [])) if (o.type === "unit"){
+    units.push({id:o.id, team:o.team, kind:o.kind, cost:cost[o.kind]||0, counted:!(o.kind==="boss"||o.kind==="lord")});
+  }
+  // 关键单位血条（军旗/主帅/镇山兽）
+  const bars = [];
+  for (const o of (meta.objects || [])) if (o.kind === "flag" || o.kind === "lord" || o.kind === "boss"){
+    bars.push({id:o.id, kind:o.kind, team:o.team, hp0:(o.hp||1), name:{flag:"军旗",lord:"主帅",boss:"镇山兽"}[o.kind]});
+  }
+  // 队伍名
+  const teams = [...new Set(units.map(u=>u.team).filter(t=>t>=0))].sort();
+  const seatName = {};
+  for (const s of (meta.seats || [])) seatName[s.team] = s.name || "";
+  const names = {};
+  for (const t of teams){
+    if (meta.mode === "level") names[t] = t===0 ? "闯关方" : "守军";
+    else names[t] = seatName[t] || ("第 "+(t+1)+" 方");
+  }
+  return {meta, scenario, frames, events, result, info, units, bars, teams, names, fps, dt};
+}
+
+/* ---------------- 载入 ---------------- */
+function load(rep){
+  R = rep;
+  $('drop').style.display = 'none';
+  const m = R.meta;
+  let title = (m.map_name || "对抗") + (m.mode === "level" ? "" : " · " + ({duel:"1v1",melee:"四方混战"}[m.mode]||m.mode));
+  $('title').textContent = "纸上谈兵 · " + title;
+  document.title = "纸上谈兵回放 · " + (m.map_name || "");
+  buildLegend(); buildEvents(); fitView(); fpos = 0; playing = false;
+  setPlaying(false); updateSide(); draw();
+}
+function buildLegend(){
+  const rows = [];
+  for (const k in KIND_CH) rows.push(`<span><i style="background:#888"></i>${KIND_ZH[k]} ${KIND_CH[k]}</span>`);
+  for (const k in PROP_ZH) rows.push(`<span><i style="background:#c80"></i>${PROP_ZH[k]}</span>`);
+  rows.push(`<span><i style="background:#999"></i>飞行石</span><span><i style="background:#555"></i>箭</span>`);
+  $('legend').innerHTML = rows.join(" ");
+}
+
+/* ---------------- 事件 ---------------- */
+function objName(id){
+  const inf = R.info[id];
+  if (!inf) return "#"+id;
+  const nm = (inf.type === "unit" || inf.type === "prop") ? (KIND_ZH[inf.kind] || PROP_ZH[inf.kind] || inf.kind) : (inf.type==="arrow"?"箭":inf.type==="stone"?"石头":"?");
+  return nm + "#" + id;
+}
+function evText(e){
+  const t = e.t, u = objName(e.u||e.v||e.a||-1);
+  switch(t){
+    case "strike": case "shoot": case "launch": return `${u} 出手（${WEAPON_ZH[e.w]||""}）`;
+    case "hit": return `${objName(e.v)} 被 ${objName(e.a)} ${WEAPON_ZH[e.w]||"击中"}${e.blk?"（被挡）":""} −${e.dmg||0}`;
+    case "death": return `${u} 阵亡（${WEAPON_ZH[e.cause]||e.cause||"?"}）`;
+    case "knock": return `${u} 被击倒`;
+    case "getup": case "stand": return `${u} ${t==="getup"?"起身":"站稳"}`;
+    case "climb": return `${u} 翻墙`;
+    case "brace": return `${u} 架枪迎击`;
+    case "fuse": return `${u} 点着了（即将爆炸）`;
+    case "explode": return `爆炸 @ ${objName(e.src||-1)}`;
+    case "fell": return `${u} 坠崖`;
+    case "drown": return `${u} 淹死`;
+    case "remove": return `${u} 离场`;
+    case "release": return `${u} 被推下/敲下`;
+    case "destroyed": return `${u}（${PROP_ZH[e.kind]||e.kind}）被毁${e.why==="boss"?"（镇山兽）":e.why==="snowball"?"（雪球）":""}`;
+    case "terrain_removed": return `地形被移除：${e.tag}`;
+    case "reroute": return `${u} 改走备用路线`;
+    case "rally_go": return `山口敌军压过来（${e.n||"?"} 人）`;
+    case "sortie": return `${u} 守军出击（${e.n||"?"} 人）`;
+    case "boss_state": return `${u} ${["游走","刨地","冲撞","晕"][e.state]||""}`;
+    case "boss_stun": return `${u} 撞晕`;
+    case "pillar_hit": return `${u} 撞立石`;
+    case "boss_fall": return `${u} 坠崖`;
+    case "fault": return `席位 ${e.seat} 指挥出错${e.detail ? "：" + e.detail : ""}`;
+    case "eliminated": return `${R.names[e.team]} 全灭`;
+    case "end": return `结束：${resultText(e)}`;
+    default: return t;
+  }
+}
+function resultText(e){
+  const w = e.winner, why = e.reason;
+  if (R.meta.mode === "level") return (w===0?"过关":"没过") + (why ? " · "+(REASON_ZH[why]||why) : "");
+  if (w == null || w < 0) return "平局" + (why?" · "+(REASON_ZH[why]||why):"");
+  return (R.names[w]||("第"+(w+1)+"方")) + " 获胜" + (why?" · "+(REASON_ZH[why]||why):"");
+}
+function buildEvents(){
+  const ul = $('events'); ul.innerHTML = "";
+  for (const e of R.events){
+    const li = document.createElement("li");
+    const sp = document.createElement("span"); sp.className = "t"; sp.textContent = (e.s*R.dt).toFixed(0)+"s";
+    const tx = document.createElement("span"); tx.textContent = evText(e);
+    li.append(sp, tx);
+    li.onclick = () => { seekToTime(e.s*R.dt); };
+    ul.append(li);
+  }
+}
+function seekToTime(t){
+  const i = frameAtT(t);
+  fpos = i; playing = false; setPlaying(false); updateSide(); draw();
+}
+
+/* ---------------- 帧/时间工具 ---------------- */
+function fidx(){ return Math.max(0, Math.min(R.frames.length-1, Math.floor(fpos + 1e-9))); }
+function curT(){ const i = fidx(); return R.frames[i].step * R.dt; }
+function frameAtT(t){
+  let lo=0, hi=R.frames.length-1;
+  while(lo<hi){ const m=(lo+hi)>>1; if(R.frames[m].step*R.dt < t-1e-6) lo=m+1; else hi=m; }
+  return lo;
+}
+function W2S(x,z){ return [(x-view.cx)*view.s + cv.clientWidth/2, (view.cz-z)*view.s + cv.clientHeight/2]; }
+function S2W(px,py){ return [(px-cv.clientWidth/2)/view.s + view.cx, view.cz - (py-cv.clientHeight/2)/view.s]; }
+
+/* ---------------- 视野 ---------------- */
+function fitView(){
+  if(!R) return;
+  const b = R.scenario.bounds || [-50,-50,50,50];
+  const pad = 4;
+  const W = cv.clientWidth, H = cv.clientHeight;
+  view.s = Math.min(W/(b[2]-b[0]+2*pad), H/(b[3]-b[1]+2*pad));
+  view.cx = (b[0]+b[2])/2; view.cz = (b[1]+b[3])/2;
+}
+
+/* ---------------- 绘制：地形 ---------------- */
+function isWaterMat(m){ m=String(m||""); return m==="water"||m==="riverbed"||m==="seabed"; }
+function boxRect(p){
+  let cx, cz, hx, hz;
+  if (p.c){ cx=p.c[0]; cz=p.c[2]; hx=p.h[0]; hz=p.h[2]; }
+  else { const mn=p.min, mx=p.max; cx=(mn[0]+mx[0])/2; cz=(mn[2]+mx[2])/2; hx=(mx[0]-mn[0])/2; hz=(mx[2]-mn[2])/2; }
+  const a=(p.yaw||0)*Math.PI/180, ca=Math.cos(a), sa=Math.sin(a);
+  return [[-1,-1],[1,-1],[1,1],[-1,1]].map(([sx,sz])=>{
+    const lx=sx*hx, lz=sz*hz;
+    return [cx + lx*ca + lz*sa, cz - lx*sa + lz*ca];
+  });
+}
+function poly(pts, fill, alpha=1){
+  if(!pts.length) return;
+  ctx.beginPath();
+  pts.forEach((p,k)=>{ const [x,y]=W2S(p[0],p[1]); k?ctx.lineTo(x,y):ctx.moveTo(x,y); });
+  ctx.closePath();
+  ctx.globalAlpha = alpha; ctx.fillStyle = fill; ctx.fill(); ctx.globalAlpha = 1;
+}
+function drawTerrain(){
+  const sc = R.scenario;
+  const prims = sc.terrain || [];
+  // 分层：水面最底 → 其他 box（地面/岩石/墙）→ 凸起（土丘/树/坡/凸包）
+  for (const p of prims) if (p.type === "box" && isWaterMat(p.mat)) poly(boxRect(p), matColor(p.mat), 0.9);
+  for (const p of prims) if (p.type === "box" && !isWaterMat(p.mat) && matColor(p.mat)) poly(boxRect(p), matColor(p.mat), 0.9);
+  for (const p of prims){
+    const col = matColor(p.mat);
+    if (!col || p.type === "box") continue;
+    if (p.type === "mound" || p.type === "cyl"){
+      const r = p.r != null ? p.r : (p.r0 || 1);
+      const c = p.c;
+      const pts = [];
+      for (let k=0;k<32;k++){ const a=2*Math.PI*k/32; pts.push([c[0]+r*Math.cos(a), c[1]+r*Math.sin(a)]); }
+      poly(pts, col, 0.85);
+    }
+    else if (p.type === "ramp"){
+      const w=(p.width||4)/2, [x0,z0]=p.from, [x1,z1]=p.to;
+      const L=Math.hypot(x1-x0,z1-z0), ux=(x1-x0)/L, uz=(z1-z0)/L, nx=-uz*w, nz=ux*w;
+      poly([[x0+nx,z0+nz],[x0-nx,z0-nz],[x1-nx,z1-nz],[x1+nx,z1+nz]], col, 0.85);
+    }
+    else if (p.type === "hull"){
+      poly((p.pts||[]).map(q=>[q[0],q[2]]), col, 0.85);
+    }
+  }
+  // 区域（泥塘/计分区等）
+  for (const zn of (sc.zones||[])){
+    const col = (zn.speed_mul && zn.speed_mul < 1) ? "#6E5034" : "#3A88C8";
+    if (zn.circle){ const [cx,cz,r]=zn.circle; const pts=[]; for(let k=0;k<32;k++){const a=2*Math.PI*k/32;pts.push([cx+r*Math.cos(a),cz+r*Math.sin(a)]);} poly(pts, col, 0.28); }
+    else if (zn.ellipse){ const [cx,cz,rx,rz]=zn.ellipse; const pts=[]; for(let k=0;k<40;k++){const a=2*Math.PI*k/40;pts.push([cx+rx*Math.cos(a),cz+rz*Math.sin(a)]);} poly(pts, col, 0.28); }
+    else if (zn.rect){ const [x0,z0,x1,z1]=zn.rect; poly([[x0,z0],[x1,z0],[x1,z1],[x0,z1]], col, 0.28); }
+  }
+  // 布阵区
+  for (const s of (sc.seats||[])) for (const d of (s.deploy||[])){
+    const [x0,z0,x1,z1] = d;
+    const [ax,ay]=W2S(x0,z1), [bx,by]=W2S(x1,z0);
+    ctx.setLineDash([5,4]); ctx.strokeStyle="rgba(120,130,150,.6)"; ctx.lineWidth=1;
+    ctx.strokeRect(ax,ay,bx-ax,by-ay); ctx.setLineDash([]);
+  }
+}
+
+/* ---------------- 绘制：单位 ---------------- */
+function teamCol(team, dead=false){
+  if (team == null || team < 0) return NEUTRAL;
+  const c = TEAM_HEX[team % 4];
+  return dead ? shade(c, -0.4) : c;
+}
+function shade(hex, f){
+  const n = parseInt(hex.slice(1),16), r=(n>>16)&255, g=(n>>8)&255, b=n&255;
+  const k = f<0 ? (1+f) : 1;
+  const mix = f<0 ? [0,0,0] : [255,255,255];
+  const rr = Math.round(r*k + mix[0]*Math.abs(f)), gg = Math.round(g*k + mix[1]*Math.abs(f)), bb = Math.round(b*k + mix[2]*Math.abs(f));
+  return `rgb(${rr},${gg},${bb})`;
+}
+function radiusOf(kind){
+  return {boss:0.9, lord:0.6, cavalry:0.6, giant:0.7, catapult:0.8, snowball:0.9, keg:0.35, flag:0.3, barrier:0.4, gate:0.4, pillar:0.4}[kind] || 0.4;
+}
+function drawUnit(r){
+  const inf = R.info[r.id], kind = inf ? inf.kind : "militia", type = inf ? inf.type : OT[r.ot];
+  const [px,py] = W2S(r.x, r.z);
+  const dead = (type === "unit" && r.st === 3);
+  const col = teamCol(r.team===255?-1:r.team, dead);
+  const rad = Math.max(5, radiusOf(kind) * view.s);
+  if (type === "unit"){
+    // 残影已单独处理；画圆点 + 兵种字符
+    ctx.beginPath(); ctx.arc(px, py, rad, 0, 7);
+    ctx.fillStyle = col; ctx.fill();
+    ctx.lineWidth = 1.2; ctx.strokeStyle = "rgba(30,34,44,.55)"; ctx.stroke();
+    if (r.fl & 128){ // 腾空
+      ctx.strokeStyle = "rgba(255,255,255,.8)"; ctx.setLineDash([2,2]);
+      ctx.beginPath(); ctx.arc(px, py, rad+3, 0, 7); ctx.stroke(); ctx.setLineDash([]);
+    }
+    if (r.st === 1 && !(r.fl&128)){ // 倒地
+      ctx.strokeStyle = "#fff"; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.moveTo(px-rad*0.6,py-rad*0.6); ctx.lineTo(px+rad*0.6,py+rad*0.6); ctx.moveTo(px+rad*0.6,py-rad*0.6); ctx.lineTo(px-rad*0.6,py+rad*0.6); ctx.stroke();
+    }
+    const ch = KIND_CH[kind] || "?";
+    ctx.fillStyle = "#fff"; ctx.font = `bold ${Math.max(9, rad*1.1)}px sans-serif`; ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.fillText(ch, px, py+1);
+  } else if (type === "arrow"){
+    // 飞行方向由前后帧位置差推（这里用当前帧减上一帧，由调用方传入）
+  } else if (type === "stone"){
+    ctx.beginPath(); ctx.arc(px, py, rad*0.8, 0, 7);
+    ctx.fillStyle = "#A8B0BC"; ctx.fill();
+    if (r.st === 0){ ctx.fillStyle="#fff"; ctx.font=`bold ${Math.max(8,rad)}px sans-serif`; ctx.textAlign="center"; ctx.textBaseline="middle"; ctx.fillText("o",px,py+1); }
+  } else if (type === "prop"){
+    const ch = PROP_CH[r.aux] || "?";
+    ctx.beginPath(); ctx.arc(px, py, rad, 0, 7);
+    ctx.fillStyle = col; ctx.fill(); ctx.lineWidth=1; ctx.strokeStyle="rgba(30,34,44,.5)"; ctx.stroke();
+    ctx.fillStyle="#fff"; ctx.font=`bold ${Math.max(9,rad*1.1)}px sans-serif`; ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.fillText(ch, px, py+1);
+  }
+  return [px, py, rad];
+}
+function drawArrows(){
+  const i = fidx(), f = R.frames[i], p = i>0 ? R.frames[i-1] : f;
+  const prev = {};
+  for (const r of p.recs) if (r.ot === 4) prev[r.id] = r;
+  for (const r of f.recs){
+    if (r.ot !== 4) continue;
+    const q = prev[r.id];
+    const [px,py] = W2S(r.x, r.z);
+    if (q){
+      const [qx,qy] = W2S(q.x, q.z);
+      ctx.strokeStyle = "#4a505c"; ctx.lineWidth = Math.max(1.5, 0.1*view.s); ctx.lineCap="round";
+      ctx.beginPath(); ctx.moveTo(qx,qy); ctx.lineTo(px,py); ctx.stroke();
+      ctx.fillStyle="#4a505c"; ctx.beginPath(); ctx.arc(px,py,Math.max(1.5,0.08*view.s),0,7); ctx.fill();
+    } else {
+      ctx.fillStyle="#4a505c"; ctx.beginPath(); ctx.arc(px,py,Math.max(1.5,0.1*view.s),0,7); ctx.fill();
+    }
+  }
+}
+
+/* ---------------- 主绘制 ---------------- */
+function draw(){
+  const W = cv.clientWidth, H = cv.clientHeight;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle = "#dbe4ec"; ctx.fillRect(0,0,W,H);
+  if (!R) return;
+  if ($('cGrid').checked){
+    const step = view.s > 40 ? 1 : view.s > 15 ? 2 : 5;
+    const [wx0,wz0]=S2W(0,H), [wx1,wz1]=S2W(W,0);
+    ctx.lineWidth=1; ctx.strokeStyle="rgba(160,170,185,.4)";
+    for (let x=Math.floor(wx0/step)*step; x<=wx1; x+=step){ const [px]=W2S(x,0); ctx.beginPath(); ctx.moveTo(px+.5,0); ctx.lineTo(px+.5,H); ctx.stroke(); }
+    for (let z=Math.floor(wz0/step)*step; z<=wz1; z+=step){ const [,py]=W2S(0,z); ctx.beginPath(); ctx.moveTo(0,py+.5); ctx.lineTo(W,py+.5); ctx.stroke(); }
+  }
+  drawTerrain();
+  drawArrows();
+  // 残影
+  const trails = [];
+  const TR = $('cTrail').checked ? 6 : 0;
+  if (TR > 0){
+    for (let k=Math.max(0, fidx()-TR); k < fidx(); k++){
+      const f = R.frames[k];
+      ctx.globalAlpha = 0.18;
+      for (const r of f.recs) if (r.ot===1) drawUnit(r);
+      ctx.globalAlpha = 1;
+    }
+  }
+  // 先画死掉的、道具、石头，再画活着的单位
+  const f = R.frames[fidx()];
+  const dead=[], props=[], stones=[], live=[];
+  for (const r of f.recs){
+    if (r.ot===1) (r.st===3?dead:live).push(r);
+    else if (r.ot===3) props.push(r);
+    else if (r.ot===2) stones.push(r);
+  }
+  for (const r of [...dead, ...props, ...stones]) drawUnit(r);
+  hover = null;
+  for (const r of live){
+    const pos = drawUnit(r);
+    if (pos && !hover){
+      const [mx,my] = mouse; if (mx!=null){ const [hx,hy]=W2S(r.x,r.z); if (Math.hypot(mx-hx,my-hy) <= pos[2]+2) hover = {r, x:hx, y:hy}; }
+    }
+  }
+  drawTimeline();
+  drawHover();
+}
+let mouse = [null,null];
+function drawHover(){
+  if (!hover){ tip.style.display="none"; return; }
+  const inf = R.info[hover.r.id], kind = inf?inf.kind:"?";
+  const nm = (inf.type==="unit"||inf.type==="prop") ? (KIND_ZH[kind]||PROP_ZH[kind]||kind) : OT[hover.r.ot];
+  const tn = hover.r.team>=0 ? (R.names[hover.r.team]||("第"+(hover.r.team+1)+"方")) : "";
+  tip.style.display="block";
+  tip.textContent = `${nm} #${hover.r.id}${tn?" · "+tn:""}\n血量 ${hover.r.hp}`;
+  tip.style.left = (hover.x+14)+"px"; tip.style.top = (hover.y-6)+"px";
+}
+
+/* ---------------- 时间轴 ---------------- */
+function drawTimeline(){
+  const W = tl.clientWidth, H = tl.clientHeight, dpr = window.devicePixelRatio||1;
+  if (tl.width !== Math.round(W*dpr) || tl.height !== Math.round(H*dpr)){
+    tl.width = Math.round(W*dpr); tl.height = Math.round(H*dpr);
+    tctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  tctx.clearRect(0,0,W,H);
+  tctx.fillStyle = "#fafbfc"; tctx.fillRect(0,0,W,H);
+  if (!R) return;
+  const N = R.frames.length, dur = R.frames[N-1].step*R.dt;
+  tctx.strokeStyle = "#e5e8ec"; tctx.lineWidth=1;
+  tctx.beginPath(); tctx.moveTo(0,H/2+.5); tctx.lineTo(W,H/2+.5); tctx.stroke();
+  // 事件刻度
+  for (const e of R.events){
+    const x = (e.s*R.dt/dur)*W;
+    tctx.fillStyle = "#c7a3e0";
+    tctx.fillRect(x, H/2-6, 2, 12);
+  }
+  // 播放头
+  const x = (curT()/dur)*W;
+  tctx.fillStyle = "#2563eb"; tctx.fillRect(x-1, 0, 2, H);
+  tctx.beginPath(); tctx.arc(x, H/2, 5, 0, 7); tctx.fill();
+}
+
+/* ---------------- 侧栏 ---------------- */
+function updateSide(){
+  if (!R) return;
+  const f = R.frames[fidx()], rec = {};
+  for (const r of f.recs) rec[r.id] = r;
+  // 比分
+  const alive = {}, cost = {}, start = {}, startCost = {};
+  for (const t of R.teams){ alive[t]=0; cost[t]=0; start[t]=0; startCost[t]=0; }
+  for (const u of R.units){
+    const r = rec[u.id];
+    if (u.counted){
+      start[u.team]++; startCost[u.team]+=u.cost;
+      if (r && r.st < 3){ alive[u.team]++; cost[u.team]+=u.cost; }
+    }
+  }
+  const sc = $('score'); sc.innerHTML = "";
+  for (const t of R.teams){
+    const div = document.createElement("div"); div.className="team";
+    const sw = document.createElement("div"); sw.className="sw"; sw.style.background = TEAM_HEX[t%4];
+    const nm = document.createElement("div"); nm.className="nm"; nm.textContent = R.names[t];
+    const num = document.createElement("div"); num.className="num"; num.textContent = `${alive[t]}/${start[t]} · 造价 ${cost[t]}/${startCost[t]}`;
+    div.append(sw,nm,num); sc.append(div);
+  }
+  // 关键单位血条
+  const bb = $('bars'); bb.innerHTML = "";
+  for (const b of R.bars){
+    const r = rec[b.id];
+    const hp = r ? r.hp : 0;
+    const frac = Math.max(0, Math.min(1, hp / b.hp0));
+    const div = document.createElement("div"); div.className="b";
+    const nm = document.createElement("span"); nm.textContent = b.name;
+    const track = document.createElement("div"); track.className="btrack";
+    const fill = document.createElement("div"); fill.className="bfill"; fill.style.width = (frac*100)+"%";
+    fill.style.background = b.team>=0 ? TEAM_HEX[b.team%4] : "#DDDDDD";
+    track.append(fill);
+    const num = document.createElement("span"); num.textContent = hp;
+    div.append(nm, track, num); bb.append(div);
+  }
+  // 结果
+  const end = R.events.find(e=>e.t==="end") || (R.result && {t:"end", winner:R.result.winner, reason:R.result.reason});
+  $('result').textContent = end ? resultText(end) : "（未结束）";
+  // 计时
+  $('tlabel').textContent = mmss(curT()) + " / " + mmss(R.frames[R.frames.length-1].step*R.dt);
+  // 事件高亮
+  const ct = curT();
+  [...$('events').children].forEach(li => {
+    const t = parseFloat(li.firstChild.textContent);
+    li.classList.toggle("now", Math.abs(t - ct) < 0.6);
+  });
+}
+function mmss(s){ s=Math.max(0,Math.round(s)); return Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); }
+
+/* ---------------- 播放控制 ---------------- */
+function setPlaying(p){
+  playing = p;
+  $('bPlay').textContent = p ? "⏸ 暂停" : "▶ 播放";
+}
+function step(d){
+  fpos = Math.max(0, Math.min(R.frames.length-1, fpos + d));
+  updateSide(); draw();
+}
+function tick(ts){
+  if (!playing) return;
+  const dt = (ts - lastTs)/1000; lastTs = ts;
+  fpos += dt * R.fps * parseFloat($('bSpeed').value);
+  if (fpos >= R.frames.length-1){ fpos = R.frames.length-1; setPlaying(false); }
+  updateSide(); draw();
+  requestAnimationFrame(tick);
+}
+
+/* ---------------- 交互 ---------------- */
+let dragging=false, panning=false, lastX=0, lastY=0;
+cv.addEventListener('mousedown', e=>{ if(!R) return; panning=true; lastX=e.clientX; lastY=e.clientY; });
+window.addEventListener('mousemove', e=>{
+  const rect = cv.getBoundingClientRect();
+  mouse = [e.clientX-rect.left, e.clientY-rect.top];
+  if (panning){ view.cx -= (e.clientX-lastX)/view.s; view.cz += (e.clientY-lastY)/view.s; lastX=e.clientX; lastY=e.clientY; draw(); }
+});
+window.addEventListener('mouseup', ()=>{ panning=false; });
+cv.addEventListener('wheel', e=>{
+  if(!R) return; e.preventDefault();
+  const rect = cv.getBoundingClientRect();
+  const [wx,wz] = S2W(e.clientX-rect.left, e.clientY-rect.top);
+  view.s *= e.deltaY < 0 ? 1.15 : 1/1.15;
+  view.cx = wx - (e.clientX-rect.left - cv.clientWidth/2)/view.s;
+  view.cz = wz + (e.clientY-rect.top - cv.clientHeight/2)/view.s;
+  draw();
+}, {passive:false});
+$('tl').addEventListener('mousedown', e=>{
+  if(!R) return;
+  const rect = tl.getBoundingClientRect();
+  const t = ((e.clientX-rect.left)/rect.width) * R.frames[R.frames.length-1].step*R.dt;
+  seekToTime(t);
+  dragging = true;
+});
+window.addEventListener('mousemove', e=>{ if(dragging){ const rect=tl.getBoundingClientRect(); const t=Math.max(0,Math.min(R.frames[R.frames.length-1].step*R.dt, ((e.clientX-rect.left)/rect.width)*R.frames[R.frames.length-1].step*R.dt)); seekToTime(t); } });
+window.addEventListener('mouseup', ()=>{ dragging=false; });
+$('bPlay').onclick = ()=>{ if(!R) return; if(playing){setPlaying(false);} else {setPlaying(true); lastTs=performance.now(); requestAnimationFrame(tick);} };
+$('bPrev').onclick = ()=> step(-1);
+$('bNext').onclick = ()=> step(1);
+$('bFit').onclick = ()=>{ fitView(); draw(); };
+$('bSpeed').onchange = ()=>{};
+$('cGrid').onchange = draw; $('cTrail').onchange = draw;
+document.addEventListener('keydown', e=>{
+  if (e.target.tagName === "SELECT") return;
+  if (e.code === "Space"){ e.preventDefault(); $('bPlay').click(); }
+  else if (e.code === "ArrowLeft") step(-1);
+  else if (e.code === "ArrowRight") step(1);
+});
+// 拖拽载入
+const drop = $('drop');
+window.addEventListener('dragover', e=>{ e.preventDefault(); drop.classList.add('hover'); });
+window.addEventListener('dragleave', ()=>{ drop.classList.remove('hover'); });
+window.addEventListener('drop', e=>{
+  e.preventDefault(); drop.classList.remove('hover');
+  const f = e.dataTransfer.files[0]; if(!f) return;
+  const rd = new FileReader();
+  rd.onload = ()=>{ try{ load(parseWrp(rd.result)); }catch(err){ alert("读取失败："+err.message); } };
+  rd.readAsArrayBuffer(f);
+});
+function resize(){
+  const dpr = window.devicePixelRatio||1;
+  cv.width = Math.round(cv.clientWidth*dpr); cv.height = Math.round(cv.clientHeight*dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  draw();
+}
+window.addEventListener('resize', resize);
+// 若有烘焙进 HTML 的回放数据（write_html 注入），自动载入
+if (typeof REPLAY_DATA !== "undefined" && REPLAY_DATA && REPLAY_DATA.meta){
+  load(REPLAY_DATA);
+} else {
+  resize();
+}
+</script>
+</body>
+</html>
