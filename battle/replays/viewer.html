@@ -198,7 +198,15 @@ function parseWrp(buf){
     if (meta.mode === "level") names[t] = t===0 ? "闯关方" : "守军";
     else names[t] = seatName[t] || ("第 "+(t+1)+" 方");
   }
-  return {meta, scenario, frames, events, result, info, units, bars, teams, names, fps, dt};
+  // AAS 顺序占点：据点列表 + 占领时间线
+  const points = [];
+  for (const z of (scenario.zones || [])) if (z.order >= 0) points.push(z);
+  points.sort((a, b) => a.order - b.order);
+  const capTimeline = {};  // order -> [[step, team], ...]
+  for (const e of events) if (e.t === "capture") {
+    (capTimeline[e.point] = capTimeline[e.point] || []).push([e.s, e.team]);
+  }
+  return {meta, scenario, frames, events, result, info, units, bars, teams, names, fps, dt, points, capTimeline};
 }
 
 /* ---------------- 载入 ---------------- */
@@ -254,6 +262,7 @@ function evText(e){
     case "boss_fall": return `${u} 坠崖`;
     case "fault": return `席位 ${e.seat} 指挥出错${e.detail ? "：" + e.detail : ""}`;
     case "eliminated": return `${R.names[e.team]} 全灭`;
+    case "capture": { const nm = (R.points && R.points[e.point]) ? (R.points[e.point].name || ("点"+(e.point+1))) : ("点"+(e.point+1)); return `${R.names[e.team]||("第"+(e.team+1)+"方")} 占下 ${nm}`; }
     case "end": return `结束：${resultText(e)}`;
     default: return t;
   }
@@ -432,6 +441,31 @@ function drawArrows(){
     }
   }
 }
+function capOwnerAt(order, step){
+  const tl = R.capTimeline ? (R.capTimeline[order] || []) : [];
+  let owner = -1;
+  for (const e of tl){ if (e[0] <= step) owner = e[1]; else break; }
+  return owner;
+}
+function drawPoints(){
+  if (!R.points || !R.points.length) return;
+  const step = R.frames[fidx()].step;
+  for (const p of R.points){
+    let cx, cz, r;
+    if (p.circle){ cx = p.circle[0]; cz = p.circle[1]; r = p.circle[2]; }
+    else { cx = (p.rect[0]+p.rect[2])/2; cz = (p.rect[1]+p.rect[3])/2; r = Math.max(p.rect[2]-p.rect[0], p.rect[3]-p.rect[1])/2; }
+    const owner = capOwnerAt(p.order, step);
+    const [px, py] = W2S(cx, cz);
+    const rad = Math.max(6, r * view.s);
+    ctx.beginPath(); ctx.arc(px, py, rad, 0, 7);
+    ctx.fillStyle = owner >= 0 ? TEAM_HEX[owner % 4] : "rgba(150,160,175,.18)";
+    ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = owner >= 0 ? TEAM_HEX[owner % 4] : "#8a94a3"; ctx.stroke();
+    ctx.fillStyle = owner >= 0 ? "#fff" : "#5a6472";
+    ctx.font = "bold 11px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(p.name || ("点"+(p.order+1)), px, py);
+  }
+}
 
 /* ---------------- 主绘制 ---------------- */
 function draw(){
@@ -447,6 +481,7 @@ function draw(){
     for (let z=Math.floor(wz0/step)*step; z<=wz1; z+=step){ const [,py]=W2S(0,z); ctx.beginPath(); ctx.moveTo(0,py+.5); ctx.lineTo(W,py+.5); ctx.stroke(); }
   }
   drawTerrain();
+  drawPoints();
   drawArrows();
   // 残影
   const trails = [];

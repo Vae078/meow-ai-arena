@@ -2426,6 +2426,9 @@ struct World::Impl {
             if (capTimer[size_t(k)] >= int(CAP_SECS * HZ)) {
                 capOwner[size_t(k)] = leader;
                 capTimer[size_t(k)] = 0;
+                EvB e("capture", stepN);
+                e.i("point", k).i("team", leader);
+                ev(e);
                 const size_t ridx = size_t(k) * nteams + size_t(leader);
                 if (!capRewarded[ridx]) {
                     capRewarded[ridx] = 1;
