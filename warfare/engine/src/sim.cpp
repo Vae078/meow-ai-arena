@@ -2704,8 +2704,8 @@ struct World::Impl {
         for (const Zone& z : sc.zones) {
             std::string zn = z.name.empty() ? "_" : z.name;
             for (char& c : zn) if (c == ' ') c = '_';
-            if (z.circle) std::snprintf(b, sizeof b, " circle %.3f %.3f %.3f\n", double(z.a[0]), double(z.a[1]), double(z.a[2]));
-            else std::snprintf(b, sizeof b, " rect %.3f %.3f %.3f %.3f\n", double(z.a[0]), double(z.a[1]), double(z.a[2]), double(z.a[3]));
+            if (z.circle) std::snprintf(b, sizeof b, " circle %.3f %.3f %.3f score %g\n", double(z.a[0]), double(z.a[1]), double(z.a[2]), double(z.score_rate));
+            else std::snprintf(b, sizeof b, " rect %.3f %.3f %.3f %.3f score %g\n", double(z.a[0]), double(z.a[1]), double(z.a[2]), double(z.a[3]), double(z.score_rate));
             o += "Z " + zn + b;
         }
         o += "SCORE " + (sc.score_zone.empty() ? std::string("-") : sc.score_zone) + "\n";

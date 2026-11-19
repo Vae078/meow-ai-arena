@@ -43,10 +43,11 @@ class KindInfo:
 
 
 class Zone:
-    def __init__(self, name, circle, a):
+    def __init__(self, name, circle, a, score_rate=0.0):
         self.name = name
         self.circle = circle
         self.a = a  # circle: [cx, cz, r, 0]；rect: [x0, z0, x1, z1]
+        self.score_rate = score_rate  # >0 = 据点，每回合归属方得这么多分
 
 
 class UnitStatic:
@@ -267,10 +268,11 @@ def parse_init(fin):
         elif line.startswith("Z "):
             p = line.split()
             name = p[1]
+            rate = float(p[p.index("score") + 1]) if "score" in p else 0.0
             if p[2] == "circle":
-                init.zones.append(Zone(name, True, [float(p[3]), float(p[4]), float(p[5]), 0.0]))
+                init.zones.append(Zone(name, True, [float(p[3]), float(p[4]), float(p[5]), 0.0], rate))
             else:
-                init.zones.append(Zone(name, False, [float(p[3]), float(p[4]), float(p[5]), float(p[6])]))
+                init.zones.append(Zone(name, False, [float(p[3]), float(p[4]), float(p[5]), float(p[6])], rate))
         elif line.startswith("SCORE "):
             s = line[6:]
             init.score_zone = "" if s == "-" else s

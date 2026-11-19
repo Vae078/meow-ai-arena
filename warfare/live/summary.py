@@ -146,13 +146,22 @@ def build_system_prompt(init, custom):
     for z in init.zones:
         if z.name == init.score_zone:
             continue
-        if z.circle:
-            cx, cz = init.to_local(z.a[0], z.a[1])
-            bits.append(f"区域「{z.name}」圆心({cx:.0f},{cz:.0f}) 半径{z.a[2]:.0f}米")
+        if z.score_rate > 0:
+            if z.circle:
+                cx, cz = init.to_local(z.a[0], z.a[1])
+                bits.append(f"据点「{z.name}」圆心({cx:.0f},{cz:.0f}) 半径{z.a[2]:.0f}米 值{z.score_rate:.0f}分")
+            else:
+                x0, z0 = init.to_local(z.a[0], z.a[1])
+                x1, z1 = init.to_local(z.a[2], z.a[3])
+                bits.append(f"据点「{z.name}」({x0:.0f},{z0:.0f})到({x1:.0f},{z1:.0f}) 值{z.score_rate:.0f}分")
         else:
-            x0, z0 = init.to_local(z.a[0], z.a[1])
-            x1, z1 = init.to_local(z.a[2], z.a[3])
-            bits.append(f"区域「{z.name}」({x0:.0f},{z0:.0f})到({x1:.0f},{z1:.0f})")
+            if z.circle:
+                cx, cz = init.to_local(z.a[0], z.a[1])
+                bits.append(f"区域「{z.name}」圆心({cx:.0f},{cz:.0f}) 半径{z.a[2]:.0f}米")
+            else:
+                x0, z0 = init.to_local(z.a[0], z.a[1])
+                x1, z1 = init.to_local(z.a[2], z.a[3])
+                bits.append(f"区域「{z.name}」({x0:.0f},{z0:.0f})到({x1:.0f},{z1:.0f})")
     if bits:
         base += "\n地图区域（本地坐标）：" + "；".join(bits) + "。"
     return base
