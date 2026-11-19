@@ -31,6 +31,7 @@ struct Zone {
     float speed_mul = 1;  // 减速区（泥塘）：身体中心在区里的单位，最高速度乘这个数
     float stick_secs = 0; // 泥塘带泥：出了区以后这么多秒内，最高速度仍按 speed_mul 算（0 = 出来就恢复）
     float score_rate = 0; // 据点：>0 表示这是个计分据点，每回合归属方得这么多分
+    int order = -1;       // AAS 顺序占点：链上的序号（0..N-1），-1 = 不是顺序占点
     bool circle = false;
     float a[4] = {0, 0, 0, 0};  // 圆：cx cz r；矩形：x0 z0 x1 z1
     bool contains(float x, float z) const {

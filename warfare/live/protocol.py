@@ -43,11 +43,12 @@ class KindInfo:
 
 
 class Zone:
-    def __init__(self, name, circle, a, score_rate=0.0):
+    def __init__(self, name, circle, a, score_rate=0.0, order=-1):
         self.name = name
         self.circle = circle
         self.a = a  # circle: [cx, cz, r, 0]；rect: [x0, z0, x1, z1]
         self.score_rate = score_rate  # >0 = 据点，每回合归属方得这么多分
+        self.order = order  # AAS 顺序占点：链上序号，-1 = 非顺序占点
 
 
 class UnitStatic:
@@ -191,7 +192,8 @@ class TickState:
         self.flying = []      # list[Flying]
         self.ghosts = []      # list[Ghost]
         self.score = []       # 每队据点累计得分
-        self.res = []         # 每队增援点
+        self.res = []         # 每队 ticket / 兵力
+        self.caps = []        # AAS 顺序占点：[(归属, 占领进度步)]
 
 
 def _readline(fin):
@@ -269,10 +271,11 @@ def parse_init(fin):
             p = line.split()
             name = p[1]
             rate = float(p[p.index("score") + 1]) if "score" in p else 0.0
+            order = int(p[p.index("order") + 1]) if "order" in p else -1
             if p[2] == "circle":
-                init.zones.append(Zone(name, True, [float(p[3]), float(p[4]), float(p[5]), 0.0], rate))
+                init.zones.append(Zone(name, True, [float(p[3]), float(p[4]), float(p[5]), 0.0], rate, order))
             else:
-                init.zones.append(Zone(name, False, [float(p[3]), float(p[4]), float(p[5]), float(p[6])], rate))
+                init.zones.append(Zone(name, False, [float(p[3]), float(p[4]), float(p[5]), float(p[6])], rate, order))
         elif line.startswith("SCORE "):
             s = line[6:]
             init.score_zone = "" if s == "-" else s
@@ -355,6 +358,14 @@ def parse_tick(fin, init):
         g.x, g.z = init.to_local(wx, wz)
         g.step = v[3]
         st.ghosts.append(g)
+
+    # C 顺序占点：每点 归属 占领进度（步）
+    line = _readline(fin)
+    n = int(line[2:])
+    for _ in range(n):
+        l = _readline(fin)
+        v = [int(x) for x in l.split()]
+        st.caps.append((v[0], v[1]))
 
     # V 事件
     line = _readline(fin)

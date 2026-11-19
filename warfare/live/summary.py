@@ -33,23 +33,45 @@ def _squad_line(kind, units):
 def build_summary(init, st):
     lines = []
     lines.append(f"【第 {st.time:.1f} 秒 · 回合 {st.tick} · {MODE_ZH.get(init.mode, init.mode)} · {init.map_name} · 时限 {init.time_limit:.0f} 秒】")
-    if st.score:
-        mine = st.score[init.seat] if init.seat < len(st.score) else 0
-        other = sum(st.score) - mine
-        lines.append(f"得分：我 {mine} : 敌 {other}")
-    if st.res:
+    if st.caps:
+        # AAS 顺序占点
+        ordered = sorted([z for z in init.zones if z.order >= 0], key=lambda z: z.order)
+        parts = []
+        for i, z in enumerate(ordered):
+            if i >= len(st.caps):
+                break
+            owner, timer = st.caps[i]
+            if owner == init.seat:
+                tag = "我"
+            elif owner >= 0:
+                tag = "敌"
+            else:
+                tag = "中立"
+            if timer > 0:
+                pct = int(min(100, timer * 100 / (10 * init.hz)))
+                tag += f"←占{pct}%"
+            parts.append(f"{z.name}[{tag}]")
+        lines.append("据点（南→北）：" + " ".join(parts))
         my_res = st.res[init.seat] if init.seat < len(st.res) else 0
-        lines.append(f"增援点：我 {my_res}（可 buy 组）")
-
-    # 目标
-    if init.mode == "duel":
-        lines.append("目标：占领据点得分（每回合据点归属方得分），时间到分高者胜；全歼对方立即胜。")
-        if init.score_zone:
-            lines.append(f"计分区「{init.score_zone}」；守住计分区里的兵越多越有利。")
-    elif init.mode == "melee":
-        lines.append("目标：四人混战，尽可能多杀、活到最后；名次和歼敌造价计分。")
+        lines.append(f"兵力(ticket)：我 {my_res}（可 buy 组）")
+        lines.append("目标：顺序占点，占满全图或耗尽敌方兵力取胜。")
     else:
-        lines.append("目标：达成本关过关条件。")
+        if st.score:
+            mine = st.score[init.seat] if init.seat < len(st.score) else 0
+            other = sum(st.score) - mine
+            lines.append(f"得分：我 {mine} : 敌 {other}")
+        if st.res:
+            my_res = st.res[init.seat] if init.seat < len(st.res) else 0
+            lines.append(f"增援点：我 {my_res}（可 buy 组）")
+        # 目标
+        if init.mode == "duel":
+            lines.append("目标：占领据点得分（每回合据点归属方得分），时间到分高者胜；全歼对方立即胜。")
+            if init.score_zone:
+                lines.append(f"计分区「{init.score_zone}」；守住计分区里的兵越多越有利。")
+        elif init.mode == "melee":
+            lines.append("目标：四人混战，尽可能多杀、活到最后；名次和歼敌造价计分。")
+        else:
+            lines.append("目标：达成本关过关条件。")
 
     # 我方
     mine = [u for u in st.units if u.alive and u.mine]
@@ -124,7 +146,7 @@ DEFAULT_SYSTEM_PROMPT = """你是《纸上谈兵》的指挥官，指挥一队�
 
 「兵种」用英文名：militia(新兵) shield(盾卫) spear(长枪兵) archer(弓手) cavalry(骑兵) hammer(大锤) bomber(炮仗兵) catapult(投石车) giant(大块头) boss(镇山兽) lord(主帅)；也可以填单个兵编号精确指挥。
 
-要点：占高地、集火残血、卡住计分区、骑兵冲弓手、枪兵顶骑兵、弓手远离近战。没提到的组保持现状。
+要点：顺序占点（只能占与自己已占点相邻的点，占点要派兵站进去守够时间）、守住前线点、集火残血、骑兵冲弓手、枪兵顶骑兵、弓手远离近战。没提到的组保持现状。
 
 每轮战报上方会附【作战计划】和【战况史】，是你之前几轮的记忆，先读它们、保持战略连续，再决策。
 

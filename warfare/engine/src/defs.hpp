@@ -89,6 +89,10 @@ inline int squad_size(int kind) {
     }
 }
 
+// AAS 顺序占点
+constexpr float CAP_SECS = 10.0f;    // 人数优势持续多久才占下
+constexpr float CAP_REWARD = 400.0f; // 首次占下新点的 ticket 奖励
+
 // 规则常数（秒、米、米/秒）
 struct Rules {
     // 阵亡与倒地

@@ -275,8 +275,12 @@ struct World::Impl {
     std::vector<float> zoneCost, aliveCostEnd;
     std::vector<double> rankPts, killPts, score;
     std::vector<float> objScore;   // 据点累计得分（每队）
-    std::vector<float> res;        // 增援点（每队，买组用）
+    std::vector<float> res;        // ticket / 兵力（每队，买组用）
     std::vector<int> rank;
+    // AAS 顺序占点
+    mutable std::vector<int> capOwner;     // 每点归属 team（-1 中立）
+    mutable std::vector<int> capTimer;     // 每点占领计时（步）
+    mutable std::vector<char> capRewarded; // 每队每点是否拿过首占奖励（team*npts + i）
 
     // 座位
     std::vector<std::vector<SeatFault>> faults;
@@ -2377,6 +2381,90 @@ struct World::Impl {
         }
     }
 
+    // ---------------- AAS 顺序占点 ----------------
+    bool aasMode() const {
+        for (const Zone& z : sc.zones) if (z.order >= 0) return true;
+        return false;
+    }
+    // 点 k（链上第 k 个，0=最南、np-1=最北）能否被 team 占（相邻已占 或 靠本队基地）
+    bool capturable(int team, int k, int np) const {
+        if (team == 0 && k == 0) return true;               // 南基地相邻
+        if (team == 1 && k == np - 1) return true;          // 北基地相邻
+        if (team == 0 && k > 0 && capOwner[size_t(k - 1)] == 0) return true;
+        if (team == 1 && k < np - 1 && capOwner[size_t(k + 1)] == 1) return true;
+        return false;
+    }
+    void capTick() {
+        if (res.empty()) res.assign(size_t(nteams), 0.0f);
+        std::vector<std::pair<int, int>> pts;  // (order, zone 下标)
+        for (size_t i = 0; i < sc.zones.size(); ++i)
+            if (sc.zones[i].order >= 0) pts.push_back({sc.zones[i].order, int(i)});
+        std::sort(pts.begin(), pts.end());
+        const int np = int(pts.size());
+        if (np == 0) return;
+        if (int(capOwner.size()) != np) {
+            capOwner.assign(size_t(np), -1);
+            capTimer.assign(size_t(np), 0);
+            capRewarded.assign(size_t(np * nteams), 0);
+        }
+        for (int k = 0; k < np; ++k) {
+            const Zone& z = sc.zones[size_t(pts[k].second)];
+            int cnt[4] = {0, 0, 0, 0};
+            for (const Unit& u : U) {
+                if (!u.alive() || u.team < 0 || u.team >= nteams) continue;
+                const Vec3 p = pos(u);
+                if (z.contains(p.GetX(), p.GetZ())) cnt[u.team]++;
+            }
+            int leader = -1;
+            if (cnt[0] > cnt[1]) leader = 0;
+            else if (cnt[1] > cnt[0]) leader = 1;
+            if (leader < 0 || leader == capOwner[size_t(k)] || !capturable(leader, k, np)) {
+                capTimer[size_t(k)] = 0;
+                continue;
+            }
+            ++capTimer[size_t(k)];
+            if (capTimer[size_t(k)] >= int(CAP_SECS * HZ)) {
+                capOwner[size_t(k)] = leader;
+                capTimer[size_t(k)] = 0;
+                const size_t ridx = size_t(k) * nteams + size_t(leader);
+                if (!capRewarded[ridx]) {
+                    capRewarded[ridx] = 1;
+                    res[size_t(leader)] += CAP_REWARD;   // 首次占下新点奖励兵力
+                }
+            }
+        }
+    }
+    void checkAasEnd() {
+        const int np = int(capOwner.size());
+        if (np == 0) return;
+        // 1. 占满所有点
+        for (int t = 0; t < nteams; ++t) {
+            bool all = true;
+            for (int k = 0; k < np; ++k) if (capOwner[size_t(k)] != t) { all = false; break; }
+            if (all) { finish(t, "cap_all"); return; }
+        }
+        // 2. 敌方兵力归 0（ticket 花光 且 场上无活兵）
+        for (int t = 0; t < nteams; ++t) {
+            const int other = 1 - t;
+            bool alive = false;
+            for (const Unit& u : U) if (u.alive() && u.team == other) { alive = true; break; }
+            if (!alive && res[size_t(other)] <= 0.5f) { finish(t, "eliminated"); return; }
+        }
+        // 3. 时间到：比占点多 → 比剩余 ticket → 平
+        if (stepN >= limitSteps) {
+            int p0 = 0, p1 = 0;
+            for (int k = 0; k < np; ++k) {
+                if (capOwner[size_t(k)] == 0) ++p0;
+                else if (capOwner[size_t(k)] == 1) ++p1;
+            }
+            if (p0 > p1) finish(0, "timeout_points");
+            else if (p1 > p0) finish(1, "timeout_points");
+            else if (res[0] > res[1] + 1e-3f) finish(0, "timeout_ticket");
+            else if (res[1] > res[0] + 1e-3f) finish(1, "timeout_ticket");
+            else finish(-1, "timeout_draw");
+        }
+    }
+
     // 买组：在基地出生一组兵（编队散开）
     void spawnSquad(int seat, int kind) {
         const SeatDef& S0 = sc.seats[size_t(seat)];
@@ -2393,6 +2481,7 @@ struct World::Impl {
     }
 
     void checkEnd() {
+        if (aasMode()) { checkAasEnd(); return; }
         std::vector<int> cnt;
         std::vector<float> cost, zone;
         aliveStats(cnt, cost, zone);
@@ -2620,7 +2709,9 @@ struct World::Impl {
         if (rec && stepN % ms.rec_every == 0) { flushEvents(); writeFrame(); }
         water = sc.water.at(now());
         // 先清上一回合已经发出去的事件，再处理这一步的事（原来清在后面：桥恰好在回合边界那一步塌，"terrain_removed" 刚记下就被清掉，程序永远收不到）
-        if (stepN % DECIDE_EVERY == 0) { tickEvents.clear(); scorePoints(); }
+        if (stepN % DECIDE_EVERY == 0) tickEvents.clear();
+        if (aasMode()) capTick();
+        else if (stepN % DECIDE_EVERY == 0) scorePoints();
         for (size_t k = 0; k < pendingRemove.size();) {
             if (pendingRemove[k].step <= stepN) {
                 const std::string tag = pendingRemove[k].tag;
@@ -2704,8 +2795,8 @@ struct World::Impl {
         for (const Zone& z : sc.zones) {
             std::string zn = z.name.empty() ? "_" : z.name;
             for (char& c : zn) if (c == ' ') c = '_';
-            if (z.circle) std::snprintf(b, sizeof b, " circle %.3f %.3f %.3f score %g\n", double(z.a[0]), double(z.a[1]), double(z.a[2]), double(z.score_rate));
-            else std::snprintf(b, sizeof b, " rect %.3f %.3f %.3f %.3f score %g\n", double(z.a[0]), double(z.a[1]), double(z.a[2]), double(z.a[3]), double(z.score_rate));
+            if (z.circle) std::snprintf(b, sizeof b, " circle %.3f %.3f %.3f score %g order %d\n", double(z.a[0]), double(z.a[1]), double(z.a[2]), double(z.score_rate), z.order);
+            else std::snprintf(b, sizeof b, " rect %.3f %.3f %.3f %.3f score %g order %d\n", double(z.a[0]), double(z.a[1]), double(z.a[2]), double(z.a[3]), double(z.score_rate), z.order);
             o += "Z " + zn + b;
         }
         o += "SCORE " + (sc.score_zone.empty() ? std::string("-") : sc.score_zone) + "\n";
@@ -2829,6 +2920,21 @@ struct World::Impl {
         putInt(o, ng);
         o += '\n';
         o += gs;
+        // AAS 顺序占点：每个点 归属 占领进度（步）。懒初始化（首次 tick 在 doStep 之前，capTick 还没跑）
+        if (aasMode() && capOwner.empty()) {
+            int np = 0;
+            for (const Zone& z : sc.zones) if (z.order >= 0) ++np;
+            capOwner.assign(size_t(np), -1);
+            capTimer.assign(size_t(np), 0);
+            capRewarded.assign(size_t(np * nteams), 0);
+        }
+        o += "C ";
+        putInt(o, int(capOwner.size()));
+        o += '\n';
+        for (size_t k = 0; k < capOwner.size(); ++k) {
+            putInt(o, capOwner[k]); o += ' ';
+            putInt(o, capTimer[k]); o += '\n';
+        }
         // 本回合的事件（地形移除、道具碎、雪球松开、Boss 换状态）
         o += "V ";
         putInt(o, int(tickEvents.size()));

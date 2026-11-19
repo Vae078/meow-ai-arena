@@ -8,7 +8,7 @@ echo   WARFARE - AI vs AI battle
 echo ============================================
 echo.
 
-python warfare\live\run_live.py --map huizhan --ai battle\live\sideA.local.json battle\live\sideB.local.json -o warfare\live\out
+python warfare\live\run_live.py --map frontline --ai battle\live\sideA.local.json battle\live\sideB.local.json -o warfare\live\out
 
 echo.
 echo --------------------------------------------------
