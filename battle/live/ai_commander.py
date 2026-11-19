@@ -10,6 +10,7 @@ import json
 import sys
 
 import commands
+import memory
 import protocol
 import providers
 import summary
@@ -37,6 +38,7 @@ def main():
     interval_ticks = max(1, int(round(interval_secs * 10)))
     max_calls = int(cfg.get("max_calls_per_match", 60))
     system_custom = cfg.get("system_prompt", "")
+    mem = memory.MemoryStore(cfg.get("agent"))
 
     init = protocol.parse_init(sys.stdin)
     if init is None:
@@ -57,7 +59,8 @@ def main():
 
         tokens = []
         if st.tick % interval_ticks == 0 and call_count < max_calls:
-            user = summary.build_summary(init, st)
+            mem.begin_turn(st)
+            user = mem.render() + "\n\n──当前战报──\n" + summary.build_summary(init, st)
             log(f"--- 决策 回合{st.tick}（第 {call_count + 1} 次调用）---")
             log(user)
             reply = None
@@ -68,15 +71,23 @@ def main():
                     break
                 except Exception as ex:
                     log(f"[调用失败 attempt={attempt}] {type(ex).__name__}: {ex}")
+            plan = None
             if reply is None:
                 log("跳过本次决策（调用失败），本回合空指令")
             else:
-                tokens, errors, reasoning = commands.parse_llm(reply, st, init)
+                rc = getattr(provider, "last_reasoning", "") or ""
+                if rc:
+                    log("[模型推理]\n" + rc.strip())
+                plan, rest = memory.extract_plan(reply)
+                if plan:
+                    log("[计划更新]\n" + plan)
+                tokens, errors, reasoning = commands.parse_llm(rest, st, init)
                 if reasoning:
                     log("[决策思路]\n" + "\n".join(reasoning))
                 for er in errors:
                     log(f"[非法指令] {er}")
                 log(f"[生效指令] {' '.join(tokens) if tokens else '(无)'}")
+            mem.finish_turn(st, st.tick, tokens, plan)
 
         sys.stdout.write(commands.make_line(st.tick, tokens) + "\n")
         sys.stdout.flush()

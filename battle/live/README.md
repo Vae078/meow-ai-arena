@@ -33,9 +33,19 @@ python battle/live/run_live.py \
 | `system_prompt` | 自定义 system prompt（空 = 用默认） | `""` |
 | `model` | 模型名（openai/anthropic 需要） | — |
 | `base_url` | OpenAI 兼容接口地址（openai 需要） | `https://api.openai.com/v1` |
+| `api_key` | API key（直接写进配置；优先级高于 `api_key_env`） | — |
 | `api_key_env` | API key 所在的环境变量名 | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` |
 | `temperature` / `max_tokens` | 采样参数 | `0.7` / `1000` |
 | `mock_reply` | mock 专用：固定回复文本（测试指令解析用） | `""` |
+| `agent` | 指挥官 agent 记忆（对象，子字段见下） | `{}` |
+
+`agent` 子字段（缺省即默认，都可省）：
+
+| 字段 | 说明 | 默认 |
+|---|---|---|
+| `history_len` | 战况史保留最近几轮 | `3` |
+| `memory_max_chars` | 记忆块最大字符数（超长截断） | `1500` |
+| `plan_enabled` | 是否启用 LLM 自编辑「作战计划」 | `true` |
 
 ### 示例
 
@@ -72,7 +82,7 @@ python battle/live/run_live.py \
 }
 ```
 
-key 从环境变量读，不落盘。OpenAI 兼容用标准库 `urllib`（零依赖）；anthropic 需要 `pip install anthropic`。
+key 优先取配置里的 `api_key` 字段，否则从 `api_key_env` 环境变量读。含 key 的配置文件（`*.local.json`）已被 `.gitignore` 忽略，切勿提交。OpenAI 兼容用标准库 `urllib`（零依赖）；anthropic 需要 `pip install anthropic`。
 
 ## 说明
 

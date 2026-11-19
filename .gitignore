@@ -73,3 +73,8 @@ bridge/archive/
 battle/engine/third_party/
 battle/rerun/
 battle/replays/*.wrp
+# 本地 AI 对战配置（含 api_key），切勿提交
+battle/live/*.local.json
+
+# Claude Code 本地设置：权限白名单会记录带 API key 的命令历史，切勿提交
+.claude/settings.local.json

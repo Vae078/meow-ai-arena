@@ -28,10 +28,12 @@ class OpenAICompatProvider(Provider):
     def __init__(self, cfg):
         self.model = cfg["model"]
         self.base_url = (cfg.get("base_url") or "https://api.openai.com/v1").rstrip("/")
-        self.api_key = os.environ.get(cfg.get("api_key_env", "OPENAI_API_KEY"), "")
+        self.api_key = cfg.get("api_key", "") or os.environ.get(cfg.get("api_key_env", "OPENAI_API_KEY"), "")
         self.temperature = float(cfg.get("temperature", 0.7))
         self.max_tokens = int(cfg.get("max_tokens", 1000))
         self.timeout = float(cfg.get("timeout", 120))
+        self.effort = cfg.get("effort", "")
+        self.last_reasoning = ""
 
     def chat(self, system, user):
         url = self.base_url + "/chat/completions"
@@ -44,6 +46,8 @@ class OpenAICompatProvider(Provider):
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
         }
+        if self.effort:
+            payload["effort"] = self.effort
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(url, data=data, headers={
             "Content-Type": "application/json",
@@ -51,14 +55,24 @@ class OpenAICompatProvider(Provider):
         })
         with urllib.request.urlopen(req, timeout=self.timeout) as resp:
             body = json.loads(resp.read().decode("utf-8"))
-        return body["choices"][0]["message"]["content"]
+        msg = body["choices"][0]["message"]
+        content = msg.get("content") or ""
+        rc = msg.get("reasoning_content") or ""
+        # 推理模型（如 deepseek-flash）把思考写进 reasoning_content，答案写进 content。
+        # content 为空（推理占满 max_tokens）时回退用 reasoning_content，避免整场空指令。
+        if content.strip():
+            self.last_reasoning = rc
+        else:
+            self.last_reasoning = ""
+            content = rc
+        return content
 
 
 class AnthropicProvider(Provider):
     def __init__(self, cfg):
         import anthropic  # 惰性导入：没装就不用
-        self.client = anthropic.Anthropic(
-            api_key=os.environ.get(cfg.get("api_key_env", "ANTHROPIC_API_KEY"), ""))
+        api_key = cfg.get("api_key", "") or os.environ.get(cfg.get("api_key_env", "ANTHROPIC_API_KEY"), "")
+        self.client = anthropic.Anthropic(api_key=api_key)
         self.model = cfg["model"]
         self.temperature = float(cfg.get("temperature", 0.7))
         self.max_tokens = int(cfg.get("max_tokens", 1000))
