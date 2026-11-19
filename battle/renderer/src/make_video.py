@@ -77,6 +77,8 @@ def render_frames(rp_path, frames_dir, a, b, args, log_dir):
             cmd += ["--no-fx"]
         if args.no_shake:
             cmd += ["--no-shake"]
+        if args.fast:
+            cmd += ["--fast"]
         log = open(os.path.join(log_dir, "seg_%05d_%05d.log" % (s, e)), "w", encoding="utf-8", errors="replace")
         children.append((subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT), log))
     try:
@@ -114,6 +116,7 @@ def main():
     ap.add_argument("--no-hud", action="store_true")
     ap.add_argument("--no-fx", action="store_true", help="不出特效（调试用）")
     ap.add_argument("--no-shake", action="store_true", help="不要镜头震动")
+    ap.add_argument("--fast", action="store_true", help="关掉光追和全局光照，大幅提速（画面略逊）")
     ap.add_argument("--work", default=None)
     ap.add_argument("--keep", action="store_true", help="保留中间帧")
     a = ap.parse_args()

@@ -8,7 +8,7 @@ from mathutils import Vector
 import scene_lib as SL
 
 
-def setup_render(samples=12, pct=100, png=True, fast=True, w=1920, h=1080):
+def setup_render(samples=12, pct=100, png=True, fast=True, raytracing=True, w=1920, h=1080):
     sc = bpy.context.scene
     sc.render.engine = 'BLENDER_EEVEE'
     sc.render.resolution_x = w
@@ -36,21 +36,22 @@ def setup_render(samples=12, pct=100, png=True, fast=True, w=1920, h=1080):
         ee.shadow_resolution_scale = 1.0
     except Exception:
         pass
-    ee.use_raytracing = True
+    ee.use_raytracing = raytracing
     ee.ray_tracing_method = 'SCREEN'
     try:
         ee.ray_tracing_options.resolution_scale = '2' if fast else '1'
     except Exception:
         pass
-    ee.use_fast_gi = True
-    try:
-        ee.fast_gi_method = 'GLOBAL_ILLUMINATION'
-        ee.fast_gi_distance = 2.5
-        ee.fast_gi_ray_count = 2
-        ee.fast_gi_step_count = 6 if fast else 8
-        ee.fast_gi_resolution = '4' if fast else '2'
-    except Exception:
-        pass
+    ee.use_fast_gi = raytracing
+    if raytracing:
+        try:
+            ee.fast_gi_method = 'GLOBAL_ILLUMINATION'
+            ee.fast_gi_distance = 2.5
+            ee.fast_gi_ray_count = 2
+            ee.fast_gi_step_count = 6 if fast else 8
+            ee.fast_gi_resolution = '4' if fast else '2'
+        except Exception:
+            pass
 
 
 def sun(az=150, el=52, energy=4.4, color=(1.0, 0.93, 0.82), angle=4.0):

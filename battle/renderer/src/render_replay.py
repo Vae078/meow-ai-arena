@@ -39,13 +39,13 @@ DEG = math.pi / 180.0
 SINK_S = 1.2                                  # 尸体沉进地面用几秒
 HIT_S = float(os.environ.get("A12_HIT_S", "0.2"))                                  # 受击闪亮持续几秒
 SINK_DEPTH = dict(cavalry=1.7, giant=2.6, boss=3.8, catapult=3.2)
-FLAGS = ("png", "no-close", "no-fx", "no-shake")
+FLAGS = ("png", "no-close", "no-fx", "no-shake", "fast")
 
 
 def parse_args():
     a = sys.argv[sys.argv.index("--") + 1:]
     opt = dict(replay=a[0], out=None, frames=None, samples=12, lord="default", pitch=None, still=None, png=False, shots=None,
-               no_close=False, cam=None, name=None, no_fx=False, no_shake=False)
+               no_close=False, cam=None, name=None, no_fx=False, no_shake=False, fast=False)
     i = 1
     while i < len(a):
         k = a[i].lstrip("-")
@@ -369,7 +369,8 @@ def main():
     else:
         pl = Player(rp, opt, a, b)
     sc = bpy.context.scene
-    STG.setup_render(int(opt["samples"]), png=bool(opt["png"]) or opt["still"] is not None, fast=True)
+    STG.setup_render(int(opt["samples"]), png=bool(opt["png"]) or opt["still"] is not None, fast=True,
+                     raytracing=not opt["fast"])
     out = opt["out"]
     os.makedirs(out, exist_ok=True)
     print("BUILD_SEC %.2f frames %d objects %d particles %d/%d" % (time.time() - t0, rp.nx, len(bpy.data.objects), pl.n_px,
