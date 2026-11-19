@@ -20,6 +20,8 @@ WAR = REPO / "warfare" / "workspace" / "war.exe"
 MAPS = REPO / "warfare" / "workspace" / "maps"
 sys.path.insert(0, str(REPO / "warfare" / "workspace"))
 import build  # noqa: E402  编译确定性指挥官 .cpp 用
+import draft  # noqa: E402  战前征召
+import providers  # noqa: E402
 
 
 def resolve_map(name):
@@ -72,7 +74,7 @@ def main():
             pass
     ap = argparse.ArgumentParser(description="AI 实时对战（1v1）")
     ap.add_argument("--map", default="樱丘")
-    ap.add_argument("--deploy", nargs=2, required=True, help="两份布阵 json（甲 乙）")
+    ap.add_argument("--deploy", nargs="*", default=[], help="两份布阵 json（可省；省了由 LLM 开局征召）")
     ap.add_argument("--ai", nargs=2, required=True,
                     help="两个座位的指挥官（甲 乙）：AI 配置 .json，或确定性程序 .cpp/.exe，或 - 不用程序")
     ap.add_argument("-o", "--out", default=str(HERE / "out"))
@@ -82,10 +84,38 @@ def main():
         sys.exit("找不到 war.exe，先运行 python warfare/build_engine.py 编译")
 
     mapf = resolve_map(args.map)
-    deploy = [str(Path(x).resolve()) for x in args.deploy]
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+
+    # 布阵：--deploy 给了就用；没给的座位由 LLM 征召（确定性程序 / 无程序的座位给空布阵）
+    map_data = json.load(open(mapf, encoding="utf-8"))
+    seats = map_data.get("seats", [])
+    deploy = []
+    for i in range(2):
+        if i < len(args.deploy):
+            deploy.append(str(Path(args.deploy[i]).resolve()))
+            continue
+        dp = out / ("deploy_%d.json" % i)
+        spec = args.ai[i]
+        if Path(spec).suffix == ".json":
+            cfg = json.load(open(spec, encoding="utf-8"))
+            provider = providers.make_provider(cfg)
+            sdef = seats[i] if i < len(seats) else {}
+            budget = int(sdef.get("budget", 1000))
+            rect = (sdef.get("deploy") or [[0, 0, 16, 10]])[0]
+            prompt = draft.build_draft_prompt(map_data.get("name", ""), budget)
+            reply = provider.chat(prompt, "请征召你的开局阵容。")
+            units, errs, total = draft.parse_draft(reply, budget)
+            for e in errs:
+                print(f"[座位{i} 征召] {e}", flush=True)
+            print(f"[座位{i} 征召] 造价{total} {units}", flush=True)
+            json.dump(draft.make_deploy(units, rect), open(dp, "w", encoding="utf-8"), ensure_ascii=False)
+        else:
+            json.dump({"units": []}, open(dp, "w", encoding="utf-8"))
+        deploy.append(str(dp.resolve()))
+
     cmds = [resolve_commander(x) for x in args.ai]
 
-    out = Path(args.out)
     replay_dir = out / "replays"
     log_dir = out / "logs"
     replay_dir.mkdir(parents=True, exist_ok=True)
