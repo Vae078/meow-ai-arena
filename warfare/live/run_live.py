@@ -127,6 +127,7 @@ def main():
            "--deploy", deploy[0], "--deploy", deploy[1],
            "--cmd", cmds[0], "--cmd", cmds[1],
            "--wall-ms", "180000", "--first-wall-ms", "180000",
+           "--step-ms", "5000", "--first-ms", "10000",
            "--max-timeouts", "0", "--match-wall-s", "0",
            "--replay", str(replay), "--json", str(result),
            "--stderr-dir", str(log_dir)]
