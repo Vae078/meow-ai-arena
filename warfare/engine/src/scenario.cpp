@@ -311,6 +311,7 @@ std::string load_scenario(const std::string& path, Scenario& sc) {
             o.name = z.str("name", "");
             o.speed_mul = float(z.num("speed_mul", 1));
             o.stick_secs = float(z.num("stick_secs", 0));
+            o.score_rate = float(z.num("score", 0));
             if (o.stick_secs < 0) return "zones 第 " + std::to_string(i + 1) + " 个的 stick_secs 不能是负数";
             if (nums(z.get("circle"), o.a, 3)) o.circle = true;
             else if (!nums(z.get("rect"), o.a, 4)) return "zones 第 " + std::to_string(i + 1) + " 个要写 circle:[cx,cz,r] 或 rect:[x0,z0,x1,z1]";

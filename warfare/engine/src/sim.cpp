@@ -274,6 +274,7 @@ struct World::Impl {
     std::string reason;
     std::vector<float> zoneCost, aliveCostEnd;
     std::vector<double> rankPts, killPts, score;
+    std::vector<float> objScore;   // 据点累计得分（每队）
     std::vector<int> rank;
 
     // 座位
@@ -2355,6 +2356,25 @@ struct World::Impl {
         }
     }
 
+    // 据点计分：每个 score>0 的据点，归"区域内造价最多"的一方，每回合给它加分
+    void scorePoints() {
+        if (objScore.empty()) objScore.assign(size_t(nteams), 0.0f);
+        for (const Zone& z : sc.zones) {
+            if (z.score_rate <= 0) continue;
+            std::vector<float> cost(size_t(nteams), 0.0f);
+            for (const Unit& u : U) {
+                if (!u.alive() || u.team >= nteams) continue;
+                const Vec3 p = pos(u);
+                if (z.contains(p.GetX(), p.GetZ())) cost[size_t(u.team)] += u.cost;
+            }
+            int owner = -1;
+            float best = 0;
+            for (int t = 0; t < nteams; ++t)
+                if (cost[size_t(t)] > best + 1e-3f) { best = cost[size_t(t)]; owner = t; }
+            if (owner >= 0) objScore[size_t(owner)] += z.score_rate;
+        }
+    }
+
     void checkEnd() {
         std::vector<int> cnt;
         std::vector<float> cost, zone;
@@ -2377,11 +2397,11 @@ struct World::Impl {
             if (started >= 2 && teamsAlive <= 1) { finish(teamsAlive == 1 ? last : -1, "annihilation"); return; }
             if (timeUp) {
                 if (sc.mode == "duel") {
-                    // 先比山头（计分区）里双方活着的兵的造价；山头上双方都没人，再比全场剩下的兵的造价；还一样算平
-                    if (zone[0] > zone[1] + 1e-3f) finish(0, "timeout_zone");
-                    else if (zone[1] > zone[0] + 1e-3f) finish(1, "timeout_zone");
-                    else if (zone[0] < 1e-3f && zone[1] < 1e-3f && cost[0] > cost[1] + 1e-3f) finish(0, "timeout_cost");
-                    else if (zone[0] < 1e-3f && zone[1] < 1e-3f && cost[1] > cost[0] + 1e-3f) finish(1, "timeout_cost");
+                    // 先比据点累计得分；一样再比全场剩余造价；还一样算平
+                    if (objScore[0] > objScore[1] + 1e-3f) finish(0, "timeout_score");
+                    else if (objScore[1] > objScore[0] + 1e-3f) finish(1, "timeout_score");
+                    else if (cost[0] > cost[1] + 1e-3f) finish(0, "timeout_cost");
+                    else if (cost[1] > cost[0] + 1e-3f) finish(1, "timeout_cost");
                     else finish(-1, "timeout_draw");
                 } else finish(-1, "timeout");
             }
@@ -2583,7 +2603,7 @@ struct World::Impl {
         if (rec && stepN % ms.rec_every == 0) { flushEvents(); writeFrame(); }
         water = sc.water.at(now());
         // 先清上一回合已经发出去的事件，再处理这一步的事（原来清在后面：桥恰好在回合边界那一步塌，"terrain_removed" 刚记下就被清掉，程序永远收不到）
-        if (stepN % DECIDE_EVERY == 0) tickEvents.clear();
+        if (stepN % DECIDE_EVERY == 0) { tickEvents.clear(); scorePoints(); }
         for (size_t k = 0; k < pendingRemove.size();) {
             if (pendingRemove[k].step <= stepN) {
                 const std::string tag = pendingRemove[k].tag;
@@ -2735,6 +2755,10 @@ struct World::Impl {
         putInt(o, stepN);
         o += ' ';
         putInt(o, sc.water.kind ? cm(water > -1e8f ? water : sc.water.at(now())) : -99999);
+        for (int t = 0; t < nteams; ++t) {  // 每队据点累计得分
+            o += ' ';
+            putInt(o, int(t < int(objScore.size()) ? objScore[size_t(t)] : 0));
+        }
         o += "\nU ";
         int n = 0;
         for (size_t i = 0; i < U.size(); ++i) if (vis[i]) ++n;
@@ -3001,6 +3025,7 @@ struct World::Impl {
                           double(t < int(aliveCostEnd.size()) ? aliveCostEnd[size_t(t)] : 0), double(t < int(zoneCost.size()) ? zoneCost[size_t(t)] : 0),
                           double(killCost[size_t(t)]), double(lostCost[size_t(t)]), elimStep[size_t(t)]);
             o += b;
+            if (t < int(objScore.size())) { std::snprintf(b, sizeof b, ",\"obj_score\":%g", double(objScore[size_t(t)])); o += b; }
             if (sc.mode == "melee" && t < nseats && !rank.empty()) {
                 std::snprintf(b, sizeof b, ",\"rank\":%d,\"rank_pts\":%.4f,\"kill_pts\":%.4f,\"score\":%.4f", rank[size_t(t)], rankPts[size_t(t)], killPts[size_t(t)], score[size_t(t)]);
                 o += b;

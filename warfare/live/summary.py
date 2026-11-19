@@ -33,10 +33,14 @@ def _squad_line(kind, units):
 def build_summary(init, st):
     lines = []
     lines.append(f"【第 {st.time:.1f} 秒 · 回合 {st.tick} · {MODE_ZH.get(init.mode, init.mode)} · {init.map_name} · 时限 {init.time_limit:.0f} 秒】")
+    if st.score:
+        mine = st.score[init.seat] if init.seat < len(st.score) else 0
+        other = sum(st.score) - mine
+        lines.append(f"得分：我 {mine} : 敌 {other}")
 
     # 目标
     if init.mode == "duel":
-        lines.append("目标：全歼对方；时间到比计分区里活兵的总造价。")
+        lines.append("目标：占领据点得分（每回合据点归属方得分），时间到分高者胜；全歼对方立即胜。")
         if init.score_zone:
             lines.append(f"计分区「{init.score_zone}」；守住计分区里的兵越多越有利。")
     elif init.mode == "melee":
