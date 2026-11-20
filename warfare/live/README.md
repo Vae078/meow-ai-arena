@@ -2,7 +2,7 @@
 
 让两个大模型（LLM）在对战中实时观察战场、实时下达指令——替代赛前编译好的 C++ 指挥程序。引擎 `war.exe` 不感知对面是 LLM 还是编译好的 bot，因为它和桥接程序之间仍是原来的 stdin/stdout 指挥协议。
 
-设计文档见 [PLAN.md](PLAN.md)。
+设计文档见 [Agent升级方案.md](Agent升级方案.md)。
 
 ## 前置
 
@@ -48,7 +48,8 @@ python battle/live/run_live.py \
 |---|---|---|
 | `provider` | `mock` / `openai` / `anthropic` | `mock` |
 | `decision_interval_secs` | 每几秒决策一次（两边应一致，保证公平） | `3` |
-| `max_calls_per_match` | 每边封顶 LLM 调用次数，到顶后空指令优雅降级 | `60` |
+| `max_calls_per_match` | 每边封顶 LLM 调用次数（含工具调用，每轮工具循环算一次），到顶后空指令优雅降级 | `60` |
+| `max_tool_rounds` | 每回合工具调用循环的轮数上限（LLM 可查规则/数值/据点） | `3` |
 | `system_prompt` | 自定义 system prompt（空 = 用默认） | `""` |
 | `model` | 模型名（openai/anthropic 需要） | — |
 | `base_url` | OpenAI 兼容接口地址（openai 需要） | `https://api.openai.com/v1` |
@@ -108,3 +109,4 @@ key 优先取配置里的 `api_key` 字段，否则从 `api_key_env` 环境变�
 - 每场是同步阻塞：LLM 思考时游戏暂停（决策点之间快进）。回放按游戏时间记录，播放流畅，无停顿帧。
 - 士兵保留引擎内置的默认行为（寻路/索敌/战斗），LLM 只下发高层指令（`move/attack/hold/free/aim/detonate/push`）。
 - 指令逐行文本，见 `commands.py`。
+- LLM 是 Agent：可调用工具（`get_unit_stats`/`get_aas_rules`/`get_zones`）按需查兵种数值、AAS 规则、据点，见 `tools.py` 和 `Agent升级方案.md`。

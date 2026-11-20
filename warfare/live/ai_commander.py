@@ -14,6 +14,7 @@ import memory
 import protocol
 import providers
 import summary
+import tools
 
 
 def log(msg):
@@ -37,6 +38,7 @@ def main():
     # WEGO：引擎每回合（8 秒）才发一次 tick，这里每回合都决策一次
     interval_ticks = 1
     max_calls = int(cfg.get("max_calls_per_match", 60))
+    max_tool_rounds = int(cfg.get("max_tool_rounds", 3))
     system_custom = cfg.get("system_prompt", "")
     mem = memory.MemoryStore(cfg.get("agent"))
 
@@ -66,8 +68,18 @@ def main():
             reply = None
             for attempt in range(2):  # 最多重试 1 次
                 try:
-                    reply = provider.chat(system, user)
-                    call_count += 1
+                    budget = max_calls - call_count
+                    def exec_tool(name, args):
+                        result = tools.execute(name, args, init, st)
+                        log(f"[工具调用] {name} {json.dumps(args, ensure_ascii=False)}")
+                        for line in result.splitlines():
+                            log(f"    {line}")
+                        return result
+                    reply, used = provider.run_agent(
+                        system, user, tools.TOOLS,
+                        exec_tool,
+                        max_rounds=max_tool_rounds, budget=budget)
+                    call_count += used
                     break
                 except Exception as ex:
                     log(f"[调用失败 attempt={attempt}] {type(ex).__name__}: {ex}")
