@@ -8,13 +8,13 @@ echo   WARFARE - AI vs AI battle
 echo ============================================
 echo.
 
-python warfare\live\run_live.py --map frontline --ai battle\live\sideA.local.json battle\live\sideB.local.json -o warfare\live\out
+python live\run_live.py --map shanheguan --ai live\sideA.local.json live\sideB.local.json -o live\out
 
 echo.
 echo --------------------------------------------------
-echo Result: warfare\live\out\result.json
-echo Logs  : warfare\live\out\logs\g0_p0.txt  (and g0_p1.txt)
-echo Replay: warfare\live\out\replays\last.wrp
+echo Result: live\out\result.json
+echo Logs  : live\out\logs\g0_p0.txt  (and g0_p1.txt)
+echo Replay: live\out\replays\last.wrp
 echo --------------------------------------------------
 echo.
 pause
