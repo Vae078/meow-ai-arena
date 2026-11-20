@@ -3,10 +3,11 @@
 // 你只要写两个函数：
 //     #include "commander.hpp"
 //     void on_start(Game& g) { ... }   // 开局调用一次（在第一回合的 on_tick 之前，这时已经能看到全场单位）
-//     void on_tick(Game& g)  { ... }   // 每 0.1 秒（6 个物理步）调用一次，在里面下指令
+//     void on_tick(Game& g)  { ... }   // 每回合（8 秒 = DECIDE_EVERY 480 步）调用一次，在里面下指令
 // 编译：g++ -O2 -std=c++17 -static 你的程序.cpp -o 你的程序.exe
 //
-// 坐标全部是"我方视角"：x 向右，z 朝敌人（和布阵文件一样），单位米。程序看得到全场，没有迷雾。
+// 坐标全部是"我方视角"：x 向右，z 朝敌人（和布阵文件一样），单位米。
+// 有战争迷雾：敌方单位只在己方任一单位视野内可见（视野外的见 g.ghosts 的最后目击）；我方单位和据点归属始终可见。
 // 规则：程序必须是确定的，不许读时钟、不许用随机数（裁判和你本地用的是同一个模拟器，结果要一模一样）。
 // 想打调试信息就写到标准错误（g.log 或 std::cerr），不要写到标准输出。
 #pragma once
@@ -18,6 +19,7 @@
 #include <cstring>
 #include <functional>
 #include <queue>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -81,6 +83,23 @@ struct ZoneInfo {
     std::string name;
     bool circle = false;
     float a[4] = {0, 0, 0, 0};  // 世界坐标
+    float score_rate = 0;       // >0 = 计分据点，每回合归属方得分
+    int order = -1;             // AAS 顺序占点：链上序号（0..N-1），-1 = 非顺序占点
+};
+
+struct Ghost {  // 迷雾里不可见、但之前目击过的敌方单位（最后目击位置 + 步号）
+    int id = 0;
+    float x = 0, z = 0;   // 我方视角坐标
+    int step = 0;         // 最后目击的绝对步号（转秒：step / 60）
+};
+
+struct SquadInfo {  // 组（squad）状态：LLM 的最小指挥单位
+    int id = 0;          // 组 id（squad_move 等指令用）
+    int kind = 0;        // 兵种
+    int seat = -1;       // 座位（== g.seat 是己方组）
+    int alive = 0;       // 组内活兵数
+    float x = 0, z = 0;  // 组中心（我方视角坐标）
+    int ord = 0;         // 组状态：0 自由 1 驻守 2 移动 3 攻击
 };
 
 class Game;
@@ -93,11 +112,12 @@ public:
     std::string mode;       // "duel"（1v1）| "melee"（四人混战）| "level"（闯关）| "sandbox"
     std::string map;        // 地图名，例如 "樱丘"、"河心洲"、"涨潮沙洲"
     int seat = 0, team = 0, teams = 2;
-    int tick = 0;           // 第几回合（每回合 0.1 秒）
+    int tick = 0;           // 第几回合（每回合 8 秒 = DECIDE_EVERY 480 步）
     float time = 0;         // 开打以后第几秒
     float time_limit = 90;  // 时限（秒）
     float water = -1e9f;    // 当前水面高度（没有水 = 很小的数）
     std::string score_zone; // 计分区的名字（没有 = 空）
+    std::vector<ZoneInfo> zones;  // 地图区域/据点（含 AAS 的 order 链序），坐标是世界坐标
     KindInfo info[KIND_COUNT];
 
     // ---- 场上的东西（每回合刷新）
@@ -105,7 +125,12 @@ public:
     std::vector<Prop> props;      // 道具和军旗
     std::vector<Flying> flying;   // 飞行中的石头、滚动中的雪球
     std::vector<BossInfo> bosses; // 镇山兽
-    // 上一回合（0.1 秒内）发生的事，每条一行，例如 "terrain_removed 桥中段"、"destroyed 37 gate"、
+    std::vector<int> score;       // 每队据点累计得分（非 AAS 模式才有意义）
+    std::vector<int> res;         // 每队 ticket / 兵力（AAS 模式 buy 组用）
+    std::vector<Ghost> ghosts;    // 迷雾里最后目击的敌方单位
+    std::vector<std::pair<int, int>> caps;  // AAS：按 order 排序的每点 (归属, 占领进度步)。归属 -1 = 中立，进度 >0 = 正在被占
+    std::vector<SquadInfo> squads;  // 组状态（组 id / 兵种 / 人数 / 中心 / 状态）
+    // 上一回合（8 秒内）发生的事，每条一行，例如 "terrain_removed 桥中段"、"destroyed 37 gate"、
     // "released 12"（雪球松开）、"boss 41 charge"（镇山兽换状态）
     std::vector<std::string> events;
     bool terrain_removed(const std::string& tag) const { for (auto& t : removed_) if (t == tag) return true; return false; }
@@ -137,7 +162,7 @@ public:
     bool in_zone(const std::string& name, float x, float z) const {
         float wx, wz;
         to_world(x, z, wx, wz);
-        for (auto& zn : zones_)
+        for (auto& zn : zones)
             if (zn.name == name) {
                 if (zn.circle) return (wx - zn.a[0]) * (wx - zn.a[0]) + (wz - zn.a[1]) * (wz - zn.a[1]) <= zn.a[2] * zn.a[2];
                 return wx >= zn.a[0] && wx <= zn.a[2] && wz >= zn.a[1] && wz <= zn.a[3];
@@ -165,6 +190,11 @@ public:
     void aim(int id, float x, float z) { pt('P', id, x, z); }           // 弓手、投石车：朝这个地点射
     void detonate(int id) { op('D', id, 0, false); }                     // 炮仗兵：立刻点火，0.6 秒后炸
     void push(int id, int snowball) { op('U', id, snowball, true); }     // 推雪球：走到球背后顶住（大锤：走到跟前敲一下）
+    void buy(Kind kind) { op('B', int(kind), 0, false); }               // AAS：花 ticket 在基地买一整组（boss/lord 不可买，会静默忽略）
+    void squad_move(int sq, float x, float z) { pt('m', sq, x, z); }   // 组移动到 (x,z)，组内按方阵展开
+    void squad_attack(int sq, int targetSq) { op('a', sq, targetSq, true); }  // 组攻击目标组，组内就近分配目标
+    void squad_hold(int sq) { op('h', sq, 0, false); }                  // 组驻守（长枪兵自动架枪）
+    void squad_free(int sq) { op('f', sq, 0, false); }                  // 组自由行动
     Unit* lord() { for (auto& u : units) if (u.mine && u.kind == 主帅) return &u; return nullptr; }
     Prop* prop(int id) { for (auto& p : props) if (p.id == id) return &p; return nullptr; }
 
@@ -190,7 +220,6 @@ private:
     int gw_ = 0, gh_ = 0;
     float gx0_ = 0, gz0_ = 0, gcell_ = 0.5f;
     std::vector<float> grid_;
-    std::vector<ZoneInfo> zones_;
     int wkind_ = 0;
     float wlevel_ = 0, wt0_ = 0, wt1_ = 0, wh0_ = 0, wh1_ = 0;
     struct Static { int kind, team, seat; std::string tag; };
@@ -278,14 +307,17 @@ inline bool Game::read_init() {
             }
         } else if (l.rfind("Z ", 0) == 0) {
             ZoneInfo zi;
-            float v[4] = {0, 0, 0, 0};
-            const int n = std::sscanf(l.c_str(), "Z %255s %255s %f %f %f %f", a, b, &v[0], &v[1], &v[2], &v[3]);
-            if (n >= 5) {
-                zi.name = a;
-                zi.circle = std::string(b) == "circle";
-                for (int i = 0; i < 4; ++i) zi.a[i] = v[i];
-                zones_.push_back(zi);
+            std::istringstream zs(l);
+            std::string tag, shape;
+            zs >> tag >> zi.name >> shape;
+            if (shape == "circle") { zs >> zi.a[0] >> zi.a[1] >> zi.a[2]; zi.circle = true; }
+            else { zs >> zi.a[0] >> zi.a[1] >> zi.a[2] >> zi.a[3]; }
+            std::string kw;
+            while (zs >> kw) {
+                if (kw == "score") zs >> zi.score_rate;
+                else if (kw == "order") zs >> zi.order;
             }
+            zones.push_back(zi);
         } else if (l.rfind("SCORE ", 0) == 0) { score_zone = l.substr(6); if (score_zone == "-") score_zone.clear(); }
         else if (l.rfind("UNITS ", 0) == 0) {
             const int n = std::atoi(l.c_str() + 6);
@@ -321,6 +353,17 @@ inline bool Game::read_tick() {
     if (std::sscanf(l.c_str(), "T %d %d %ld", &tick, &stp, &wl) != 3) return false;
     time = float(stp) / float(hz_);
     water = wl == -99999 ? -1e9f : float(wl) / 100.0f;
+    score.assign(size_t(teams), 0);
+    res.assign(size_t(teams), 0);
+    {
+        std::istringstream ts(l);
+        std::string tag;
+        long dummy;
+        ts >> tag >> dummy >> dummy >> dummy;  // 跳过 T tick step water
+        int v;
+        for (int t = 0; t < teams; ++t) if (ts >> v) score[size_t(t)] = v;
+        for (int t = 0; t < teams; ++t) if (ts >> v) res[size_t(t)] = v;
+    }
     units.clear();
     props.clear();
     flying.clear();
@@ -360,6 +403,32 @@ inline bool Game::read_tick() {
             u.mine = s.seat == seat;
         }
         units.push_back(u);
+    }
+    // G 幽灵（迷雾里不可见、但之前目击过的敌方单位）
+    if (!read_line(l) || l.rfind("G ", 0) != 0) return false;
+    n = std::atoi(l.c_str() + 2);
+    ghosts.clear();
+    for (int i = 0; i < n; ++i) {
+        if (!read_line(l)) return false;
+        long v[4];
+        const char* p = l.c_str();
+        for (int k = 0; k < 4; ++k) { char* e; v[k] = std::strtol(p, &e, 10); p = e; }
+        Ghost g;
+        g.id = int(v[0]);
+        const float wx = float(v[1]) / 100.0f, wz = float(v[2]) / 100.0f;
+        to_local(wx, wz, g.x, g.z);
+        g.step = int(v[3]);
+        ghosts.push_back(g);
+    }
+    // C AAS 顺序占点：每点 归属 占领进度（步）
+    if (!read_line(l) || l.rfind("C ", 0) != 0) return false;
+    n = std::atoi(l.c_str() + 2);
+    caps.clear();
+    for (int i = 0; i < n; ++i) {
+        if (!read_line(l)) return false;
+        int owner = 0, timer = 0;
+        std::sscanf(l.c_str(), "%d %d", &owner, &timer);
+        caps.push_back({owner, timer});
     }
     if (!read_line(l) || l.rfind("V ", 0) != 0) return false;
     n = std::atoi(l.c_str() + 2);
@@ -421,6 +490,23 @@ inline bool Game::read_tick() {
         f.vy = float(v[5]) / 100.0f;
         to_local(float(v[7]) / 100.0f, float(v[8]) / 100.0f, f.land_x, f.land_z);
         flying.push_back(f);
+    }
+    if (!read_line(l) || l.rfind("Q ", 0) != 0) return false;
+    n = std::atoi(l.c_str() + 2);
+    squads.clear();
+    for (int i = 0; i < n; ++i) {
+        if (!read_line(l)) return false;
+        long v[7];
+        const char* p = l.c_str();
+        for (int k = 0; k < 7; ++k) { char* e; v[k] = std::strtol(p, &e, 10); p = e; }
+        SquadInfo sq;
+        sq.id = int(v[0]);
+        sq.kind = int(v[1]);
+        sq.seat = int(v[2]);
+        sq.alive = int(v[3]);
+        to_local(float(v[4]) / 100.0f, float(v[5]) / 100.0f, sq.x, sq.z);
+        sq.ord = int(v[6]);
+        squads.push_back(sq);
     }
     if (!read_line(l) || l != "E") return false;
     return true;
