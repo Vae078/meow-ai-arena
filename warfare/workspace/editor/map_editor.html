@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>地图编辑器</title>
+<style>
+:root{
+  --bg:#14161a; --panel:#1e2126; --panel2:#262a30; --line:#33383f;
+  --fg:#e6e8eb; --muted:#9aa2ab; --acc:#4da3ff; --danger:#ff5c5c;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font:13px/1.5 "Segoe UI","Microsoft YaHei",system-ui,sans-serif;display:flex;flex-direction:column;overflow:hidden}
+#toolbar{display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+#toolbar .grp{display:flex;align-items:center;gap:4px;padding:0 8px;border-right:1px solid var(--line)}
+#toolbar .grp:last-child{border-right:none}
+button{background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:4px 9px;cursor:pointer;font-size:12px}
+button:hover{border-color:var(--acc)}
+button:disabled{opacity:.4;cursor:default}
+button.primary{background:#1f5f9e;border-color:#1f5f9e}
+select,input[type=text],input[type=number]{background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:3px 6px;font-size:12px}
+input[type=number]{width:70px}
+label.ck{display:flex;align-items:center;gap:3px;color:var(--muted);font-size:12px;cursor:pointer}
+#main{flex:1;display:flex;min-height:0}
+#list{width:230px;background:var(--panel);border-right:1px solid var(--line);overflow-y:auto;padding:8px;flex-shrink:0}
+#list h4{margin:10px 0 4px;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+#list .item{display:flex;align-items:center;gap:5px;padding:3px 6px;border-radius:4px;cursor:pointer;white-space:nowrap;overflow:hidden}
+#list .item:hover{background:var(--panel2)}
+#list .item.sel{background:#1f5f9e}
+#list .item .nm{flex:1;overflow:hidden;text-overflow:ellipsis}
+#list .item .del{color:var(--muted);padding:0 3px;flex-shrink:0}
+#list .item .del:hover{color:var(--danger)}
+#list .addrow{display:flex;gap:4px;margin:3px 0}
+#list .addrow select,#list .addrow button{flex:1}
+#viewport{flex:1;position:relative;min-width:0}
+#viewport canvas{display:block}
+#props{width:300px;background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;padding:10px;flex-shrink:0}
+#props h3{margin:0 0 8px;font-size:14px}
+#props .fld{margin-bottom:7px}
+#props .fld>label{display:block;color:var(--muted);font-size:11px;margin-bottom:2px}
+#props .fld .vec{display:flex;gap:4px;align-items:center}
+#props .fld .vec input{flex:1;min-width:0}
+#props .fld .row{display:flex;gap:4px;align-items:center;margin-bottom:3px}
+#props .fld .row input{flex:1;min-width:0}
+#props .fld .row button{flex-shrink:0}
+#props .sub{border:1px solid var(--line);border-radius:5px;padding:7px;margin-bottom:7px}
+#props .sub>label{display:block;color:var(--acc);font-size:11px;margin-bottom:4px}
+#props .empty{color:var(--muted);font-size:12px;padding:20px 0;text-align:center}
+#status{padding:5px 10px;background:var(--panel);border-top:1px solid var(--line);color:var(--muted);font-size:12px;display:flex;gap:12px}
+#toast{position:fixed;right:16px;bottom:40px;background:#1f5f9e;color:#fff;padding:8px 14px;border-radius:5px;font-size:12px;opacity:0;transition:opacity .2s;pointer-events:none}
+#toast.show{opacity:1}
+#toast.err{background:var(--danger)}
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <div class="grp"><b>地图编辑器</b></div>
+  <div class="grp">
+    <select id="fileSel" style="min-width:180px"></select>
+    <button id="btnLoad">加载</button>
+    <button id="btnUpload">上传</button>
+    <button id="btnSave" class="primary">保存</button>
+    <button id="btnSaveAs">另存为…</button>
+    <button id="btnDownload">下载</button>
+  </div>
+  <div class="grp">
+    <button id="btnUndo">撤销</button>
+    <button id="btnRedo">重做</button>
+  </div>
+  <div class="grp">
+    <label class="ck"><input type="checkbox" id="ckGrid" checked>网格</label>
+    <label class="ck"><input type="checkbox" id="ckTrees">树预览</label>
+    <label class="ck"><input type="checkbox" id="ckMoveY">移动Y</label>
+  </div>
+  <div class="grp"><button id="btnView">重置视角</button></div>
+</div>
+
+<div id="main">
+  <div id="list"></div>
+  <div id="viewport"></div>
+  <div id="props"><div class="empty">未选中任何对象。点击左侧列表或 3D 场景里的物体。</div></div>
+</div>
+
+<div id="status"><span id="stFile">未加载</span><span id="stObj">0 对象</span></div>
+<div id="toast"></div>
+<input type="file" id="fileIn" accept=".json" style="display:none">
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
+import { ConvexGeometry } from 'three/addons/geometries/ConvexGeometry.js';
+
+const DEG = Math.PI / 180;
+
+/* ============================== 常量与色板 ============================== */
+const KINDS = [['militia','新兵'],['shield','盾卫'],['spear','长枪兵'],['archer','弓手'],['cavalry','骑兵'],['hammer','大锤'],['bomber','炮仗兵'],['catapult','投石车'],['giant','大块头'],['boss','镇山兽'],['lord','主帅']];
+const BEHAVIORS = ['default','hold','march','idle'];
+const PRIM_TYPES = ['box','ramp','cyl','mound','hull','forest'];
+const PROP_TYPES = ['snowball','keg','flag','barrier','gate','pillar'];
+const COND_TYPES = ['eliminate','destroy','dead','zone_held','reach'];
+const MODES = ['sandbox','duel','melee','level'];
+const MATS = ['grass','rock','wood','sand','stone','wall','bridge','tree','ice','snow','cobble','riverbed','flagstone','bell_tower','bridge_wood','plank','house','edge','grass_hill','sand_wet','seabed','reef'];
+const TEAM_COLORS = [0x3f7fdb, 0xdb4a3f, 0x3fbf6f, 0xdbae3f];
+const MAT_COLORS = { grass:0x6da635, rock:0x9a9a94, wood:0xa97c50, sand:0xe4c97e, stone:0x8a8a8a, wall:0x7a7a7a, bridge:0x8b5a2b, tree:0x4f7d33, ice:0xbfe3f0, snow:0xf2f6f8, cobble:0x8a8a88, riverbed:0x5a6b8a, flagstone:0xb0a898, bell_tower:0x6e5a48, bridge_wood:0x9a6b3f, plank:0xa5835a, house:0xc9b8a3, edge:0x4a4a4a, grass_hill:0x7fb24a, sand_wet:0xc7a95c, seabed:0x4a5a6a, reef:0x6a6a72 };
+
+/* ============================== 全局状态 ============================== */
+let doc = null;
+let currentFile = null;
+const undoStack = [], redoStack = [];
+let sel = null;          // {obj, category}
+let selMesh = null;
+let sceneGroup = new THREE.Group();
+let selHelper = null;
+let formSnapshot = null; // 表单渲染时的文档快照，供字段提交时入撤销栈
+
+/* ============================== Three.js 基础 ============================== */
+const viewport = document.getElementById('viewport');
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(viewport.clientWidth, viewport.clientHeight);
+viewport.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x101216);
+scene.fog = new THREE.Fog(0x101216, 120, 400);
+scene.add(sceneGroup);
+
+const camera = new THREE.PerspectiveCamera(55, viewport.clientWidth/viewport.clientHeight, 0.1, 1000);
+camera.position.set(45, 55, 60);
+
+const grid = new THREE.GridHelper(200, 40, 0x3a4048, 0x262a30);
+grid.position.y = 0.01;
+scene.add(grid);
+const axes = new THREE.AxesHelper(8);
+scene.add(axes);
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x445, 0.9));
+const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+sun.position.set(60, 100, 40);
+scene.add(sun);
+
+const orbit = new OrbitControls(camera, renderer.domElement);
+orbit.enableDamping = true;
+orbit.dampingFactor = 0.08;
+orbit.target.set(0, 0, 0);
+orbit.maxPolarAngle = Math.PI * 0.495;
+
+const tx = new TransformControls(camera, renderer.domElement);
+tx.setMode('translate');
+scene.add(tx);
+tx.addEventListener('dragging-changed', (e) => {
+  orbit.enabled = !e.value;
+  if (e.value) { beginEdit(); if (tx.object) tx.object.userData._prev = tx.object.position.clone(); }
+});
+tx.addEventListener('objectChange', () => { if (tx.object) syncFromMesh(tx.object); });
+tx.addEventListener('mouseUp', () => { if (tx.object) { tx.object.userData._prev = null; rebuildAll(); } });
+
+/* ============================== 材质/几何工具 ============================== */
+function solid(mat, color){
+  const m = new THREE.MeshStandardMaterial({ color: (mat && MAT_COLORS[mat]) || color || 0xcccccc, roughness:0.9, metalness:0.0 });
+  return m;
+}
+function overlay(color, opacity){
+  return new THREE.MeshBasicMaterial({ color, transparent:true, opacity, side:THREE.DoubleSide, depthWrite:false });
+}
+function flatY(geo, mat, y){ const m = new THREE.Mesh(geo, mat); m.rotation.x = -Math.PI/2; m.position.y = y; return m; }
+
+function rampGeometry(p){
+  const x0=p.from[0], z0=p.from[1], x1=p.to[0], z1=p.to[1];
+  const dx=x1-x0, dz=z1-z0, len=Math.hypot(dx,dz)||1;
+  const px=-dz/len, pz=dx/len, hw=p.width/2;
+  const lx0=x0-px*hw, lz0=z0-pz*hw, rx0=x0+px*hw, rz0=z0+pz*hw;
+  const lx1=x1-px*hw, lz1=z1-pz*hw, rx1=x1+px*hw, rz1=z1+pz*hw;
+  const b=p.base, t0=p.h0, t1=p.h1;
+  const v=[
+    [lx0,b,lz0],[rx0,b,rz0],[rx1,b,rz1],[lx1,b,lz1],
+    [lx0,t0,lz0],[rx0,t0,rz0],[rx1,t1,rz1],[lx1,t1,lz1],
+  ];
+  const idx=[
+    0,2,1, 0,3,2, 4,5,6, 4,6,7,
+    0,1,5, 0,5,4, 3,7,6, 3,6,2,
+    1,2,6, 1,6,5, 0,4,7, 0,7,3,
+  ];
+  const pos=[];
+  for(const i of idx) pos.push(...v[i]);
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos,3));
+  g.computeVertexNormals();
+  return g;
+}
+
+/* ============================== 场景对象 → 网格 ============================== */
+function boxC(obj){ if(obj.c) return obj.c.slice(); const mn=obj.min,mx=obj.max; return [(mn[0]+mx[0])/2,(mn[1]+mx[1])/2,(mn[2]+mx[2])/2]; }
+function boxH(obj){ if(obj.h) return obj.h.slice(); const mn=obj.min,mx=obj.max; return [Math.abs(mx[0]-mn[0])/2,Math.abs(mx[1]-mn[1])/2,Math.abs(mx[2]-mn[2])/2]; }
+function setBoxC(obj,c){ if(obj.c){ obj.c=[c[0],c[1],c[2]]; } else { const h=boxH(obj); obj.min=[c[0]-h[0],c[1]-h[1],c[2]-h[2]]; obj.max=[c[0]+h[0],c[1]+h[1],c[2]+h[2]]; } }
+
+function mark(obj, category, mesh){
+  mesh.userData.obj = obj;
+  mesh.userData.category = category;
+  sceneGroup.add(mesh);
+  return mesh;
+}
+
+function buildPrimMesh(p){
+  let mesh;
+  if(p.type==='box'){
+    const c=boxC(p), h=boxH(p);
+    mesh=new THREE.Mesh(new THREE.BoxGeometry(h[0]*2,h[1]*2,h[2]*2), solid(p.mat));
+    mesh.position.set(c[0],c[1],c[2]); mesh.rotation.y=(p.yaw||0)*DEG;
+  } else if(p.type==='cyl'){
+    const r=p.r, y0=p.y0, y1=p.y1;
+    mesh=new THREE.Mesh(new THREE.CylinderGeometry(r,r,y1-y0,p.segs||12), solid(p.mat));
+    mesh.position.set(p.c[0],(y0+y1)/2,p.c[2]);
+  } else if(p.type==='mound'){
+    mesh=new THREE.Mesh(new THREE.CylinderGeometry(p.r1,p.r0,p.y1-p.y0,p.segs||32), solid(p.mat));
+    mesh.position.set(p.c[0],(p.y0+p.y1)/2,p.c[2]);
+  } else if(p.type==='ramp'){
+    mesh=new THREE.Mesh(rampGeometry(p), solid(p.mat));
+  } else if(p.type==='hull'){
+    const pts=(p.pts||[]).map(a=>new THREE.Vector3(a[0],a[1],a[2]));
+    mesh=new THREE.Mesh(new ConvexGeometry(pts), solid(p.mat));
+  } else if(p.type==='forest'){
+    const g=new THREE.Group();
+    const mn=p.min, mx=p.max, y0=p.y0??-0.5, h=p.h??5;
+    const box=new THREE.BoxGeometry(mx[0]-mn[0], h, mx[1]-mn[1]);
+    const bm=new THREE.Mesh(box, overlay(0x4f7d33,0.18));
+    bm.position.set((mn[0]+mx[0])/2, y0+h/2, (mn[1]+mx[1])/2);
+    g.add(bm);
+    const e=new THREE.LineSegments(new THREE.EdgesGeometry(box), new THREE.LineBasicMaterial({color:0x4f7d33}));
+    e.position.copy(bm.position); g.add(e);
+    g.userData._forestPreview=null;
+    g.userData._forestNeedPreview=document.getElementById('ckTrees').checked;
+    mesh=g;
+  }
+  return mesh;
+}
+
+function buildZoneMesh(z){
+  const col = (z.order!=null && z.order>=0) ? 0x4da3ff : (z.speed_mul!=null && z.speed_mul<1) ? 0xb07a3f : (z.score>0) ? 0x3fbf6f : 0x888888;
+  let geo, y=0.15;
+  if(z.circle){ geo=new THREE.CircleGeometry(z.circle[2], 48); }
+  else { const w=z.rect[2]-z.rect[0], d=z.rect[3]-z.rect[1]; geo=new THREE.PlaneGeometry(w,d); }
+  const m=new THREE.Mesh(geo, overlay(col,0.28));
+  if(z.circle){ m.position.set(z.circle[0],y,z.circle[1]); }
+  else { m.position.set((z.rect[0]+z.rect[2])/2,y,(z.rect[1]+z.rect[3])/2); }
+  m.rotation.x=-Math.PI/2;
+  const e=new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({color:col}));
+  e.position.copy(m.position); e.rotation.x=-Math.PI/2;
+  const g=new THREE.Group(); g.add(m); g.add(e);
+  return g;
+}
+
+function buildSeatMesh(s, idx){
+  const g=new THREE.Group();
+  const col=TEAM_COLORS[idx%4];
+  for(const r of (s.deploy||[])){
+    const w=r[2]-r[0], d=r[3]-r[1];
+    // 布阵区是「我方视角」的矩形，换算到世界要按 origin+yaw 旋转
+    const cx=(r[0]+r[2])/2, cz=(r[1]+r[3])/2;
+    const yaw=(s.yaw||0)*DEG, ox=s.origin[0], oz=s.origin[1];
+    const wx=ox + cx*Math.cos(yaw) - cz*Math.sin(yaw);
+    const wz=oz + cx*Math.sin(yaw) + cz*Math.cos(yaw);
+    const m=flatY(new THREE.PlaneGeometry(w,d), overlay(col,0.22), 0.15);
+    m.position.x=wx; m.position.z=wz; m.rotation.y=yaw;
+    g.add(m);
+  }
+  const cone=new THREE.Mesh(new THREE.ConeGeometry(1.2,3,16), solid(null,col));
+  cone.position.set(s.origin[0],1.5,s.origin[1]); cone.rotation.y=(s.yaw||0)*DEG;
+  cone.rotation.x = 0;
+  g.add(cone);
+  return g;
+}
+
+function buildPropMesh(p){
+  let m;
+  if(p.type==='snowball'){ m=new THREE.Mesh(new THREE.SphereGeometry(p.r||1.5,20,20), solid(null,0xeef2f6)); }
+  else if(p.type==='keg'){ m=new THREE.Mesh(new THREE.CylinderGeometry(p.r||0.6,p.r||0.6,0.9,14), solid(null,0x5a4a3a)); }
+  else if(p.type==='flag'){ const g=new THREE.Group(); const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.06,3.2,8), solid(null,0x888)); pole.position.y=1.6; g.add(pole); const f=new THREE.Mesh(new THREE.PlaneGeometry(1.4,0.9), overlay(TEAM_COLORS[p.team>=0?p.team:0],1)); f.position.set(0.7,2.6,0); g.add(f); m=g; }
+  else if(p.type==='barrier'||p.type==='gate'||p.type==='pillar'){ m=new THREE.Mesh(new THREE.BoxGeometry(p.hx*2,p.hy*2,p.hz*2), solid(null,0x8a6a3f)); m.rotation.y=(p.yaw||0)*DEG; }
+  else { m=new THREE.Mesh(new THREE.BoxGeometry(1,1,1), solid(null,0xaaaaaa)); }
+  m.position.set(p.x, p.y>=0?p.y:0.5, p.z);
+  return m;
+}
+
+function unitKindName(t){ const k=KINDS.find(k=>k[0]===t||k[1]===t); return k?k[1]:t; }
+function buildUnitMesh(u){
+  const base = u.group || u;
+  const col = TEAM_COLORS[base.team!=null?base.team:1];
+  const g=new THREE.Group();
+  const yaw=(base.yaw||0)*DEG;
+  const mk=(x,y,z)=>{
+    const b=new THREE.Mesh(new THREE.BoxGeometry(0.7,1.4,0.4), solid(null,col));
+    b.position.set(x, y>=0?y+0.7:0.7, z);
+    b.rotation.y=yaw;
+    const dir=new THREE.Mesh(new THREE.ConeGeometry(0.25,0.8,6), solid(null,col));
+    dir.position.set(0,1.2,0); dir.rotation.x=Math.PI/2; b.add(dir);
+    g.add(b);
+  };
+  if(u.group){
+    const rows=u.group.rows||1, cols=u.group.cols||1, dx=u.group.dx||1, dz=u.group.dz||1;
+    for(let r=0;r<rows;r++) for(let k=0;k<cols;k++){
+      const lx=(k-(cols-1)*0.5)*dx, lz=-r*dz;
+      const wx=base.x + lx*Math.cos(yaw) + lz*Math.sin(yaw);
+      const wz=base.z - lx*Math.sin(yaw) + lz*Math.cos(yaw);
+      mk(wx, base.y, wz);
+    }
+  } else { mk(base.x, base.y, base.z); }
+  // 行军路线
+  const line=(pts,col2)=>{ if(!pts||!pts.length) return; const arr=[]; for(const p of pts) arr.push(new THREE.Vector3(p[0],0.3,p[1])); const geo=new THREE.BufferGeometry().setFromPoints(arr); const l=new THREE.Line(geo, new THREE.LineBasicMaterial({color:col2})); g.add(l); };
+  line(base.route, 0xffffff); line(base.alt_route, 0xffcc00);
+  return g;
+}
+
+/* ============================== 全量重建 ============================== */
+function rebuildAll(){
+  sceneGroup.clear();
+  if(selHelper){ scene.remove(selHelper); selHelper=null; }
+  tx.detach();
+  let count=0;
+  for(const p of (doc.terrain||[])){ mark(p,'terrain', buildPrimMesh(p)); count++; }
+  for(const z of (doc.zones||[])){ mark(z,'zone', buildZoneMesh(z)); count++; }
+  (doc.seats||[]).forEach((s,i)=>{ mark(s,'seat', buildSeatMesh(s,i)); count++; });
+  for(const p of (doc.props||[])){ mark(p,'prop', buildPropMesh(p)); count++; }
+  for(const u of (doc.units||[])){ const m=buildUnitMesh(u); if(m){ mark(u,'unit',m); count++; } }
+  if(doc.water){ buildWater(); }
+  if(doc.bounds){ buildBounds(); }
+  document.getElementById('stObj').textContent = count + ' 对象';
+  if(sel) selectMesh(findMesh(sel.obj));
+  renderList();
+  renderForm();
+}
+
+function buildWater(){
+  const w=doc.water, b=doc.bounds||[-50,-50,50,50];
+  const level = w.tide ? Math.max(w.tide.h0,w.tide.h1) : w.level;
+  const m=flatY(new THREE.PlaneGeometry(b[2]-b[0], b[3]-b[1]), overlay(0x3f8fbf,0.35), level);
+  m.name='water';
+  sceneGroup.add(m);
+}
+function buildBounds(){
+  const b=doc.bounds, y0=-0.05, y1=6;
+  const pts=[ [b[0],y0,b[1]],[b[2],y0,b[1]],[b[2],y0,b[3]],[b[0],y0,b[3]],[b[0],y0,b[1]],
+              [b[0],y1,b[1]],[b[2],y1,b[1]],[b[2],y1,b[3]],[b[0],y1,b[3]] ];
+  const v=[];
+  for(const p of pts) v.push(...p);
+  const g=new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(v,3));
+  const idx=[0,1,1,2,2,3,3,0,4,5,5,6,6,7,7,8,0,4,1,5,2,6,3,7];
+  g.setIndex(idx);
+  const l=new THREE.LineSegments(g, new THREE.LineBasicMaterial({color:0x556}));
+  l.name='bounds'; sceneGroup.add(l);
+}
+
+function findMesh(obj){ for(const m of sceneGroup.children) if(m.userData.obj===obj) return m; return null; }
+const TRANSFORMABLE = new Set(['box','cyl','mound','prop','unit','zone','seat']);
+function selectMesh(mesh){
+  if(selHelper){ scene.remove(selHelper); selHelper=null; }
+  if(!mesh){ tx.detach(); selMesh=null; return; }
+  selMesh=mesh;
+  selHelper=new THREE.BoxHelper(mesh, 0xffff00);
+  scene.add(selHelper);
+  const cat=mesh.userData.category;
+  if(TRANSFORMABLE.has(cat)){
+    tx.attach(mesh);
+    tx.setMode('translate');
+    tx.showY = (cat==='box'||cat==='prop'||cat==='unit'||cat==='cyl'||cat==='mound') && document.getElementById('ckMoveY').checked;
+    tx.showX = tx.showZ = true;
+  } else {
+    tx.detach();
+  }
+}
+
+/* ============================== 变换回写（增量式） ============================== */
+function syncFromMesh(mesh){
+  const obj=mesh.userData.obj, cat=mesh.userData.category;
+  const prev=mesh.userData._prev;
+  if(!prev){ mesh.userData._prev=mesh.position.clone(); return; }
+  const d=mesh.position.clone().sub(prev);
+  mesh.userData._prev=mesh.position.clone();
+  if(d.lengthSq()<1e-9) return;
+  if(cat==='box'){ const c=boxC(obj); setBoxC(obj,[c[0]+d.x,c[1]+d.y,c[2]+d.z]); }
+  else if(cat==='cyl'||cat==='mound'){ obj.c[0]+=d.x; obj.c[2]+=d.z; obj.y0+=d.y; obj.y1+=d.y; }
+  else if(cat==='prop'){ obj.x+=d.x; obj.y+=d.y; obj.z+=d.z; }
+  else if(cat==='unit'){ const b=obj.group||obj; b.x+=d.x; b.z+=d.z; if(b.y>=0) b.y+=d.y; }
+  else if(cat==='zone'){ if(obj.circle){ obj.circle[0]+=d.x; obj.circle[1]+=d.z; } else { for(let i=0;i<4;i++) obj.rect[i]+= (i%2?d.z:d.x); } }
+  else if(cat==='seat'){ obj.origin[0]+=d.x; obj.origin[1]+=d.z; }
+}
+
+/* ============================== 撤销/重做 ============================== */
+function beginEdit(){ undoStack.push(JSON.parse(JSON.stringify(doc))); if(undoStack.length>100) undoStack.shift(); redoStack.length=0; }
+function commitChange(){ if(formSnapshot) undoStack.push(formSnapshot); if(undoStack.length>100) undoStack.shift(); redoStack.length=0; rebuildAll(); }
+function undo(){ if(!undoStack.length) return; redoStack.push(JSON.parse(JSON.stringify(doc))); doc=undoStack.pop(); sel=null; rebuildAll(); }
+function redo(){ if(!redoStack.length) return; undoStack.push(JSON.parse(JSON.stringify(doc))); doc=redoStack.pop(); sel=null; rebuildAll(); }
+
+/* ============================== 选择 ============================== */
+function select(obj, category){
+  sel = obj ? {obj, category} : null;
+  renderForm();
+  renderList();
+  const m = obj ? findMesh(obj) : null;
+  selectMesh(m);
+}
+function selectByRay(e){
+  const rect=renderer.domElement.getBoundingClientRect();
+  const ndc=new THREE.Vector2(((e.clientX-rect.left)/rect.width)*2-1, -((e.clientY-rect.top)/rect.height)*2+1);
+  const r=new THREE.Raycaster(); r.setFromCamera(ndc,camera);
+  const hits=r.intersectObjects(sceneGroup.children, true);
+  for(const h of hits){
+    let o=h.object; while(o && !o.userData.obj) o=o.parent;
+    if(o && o.userData.obj){ select(o.userData.obj, o.userData.category); return; }
+  }
+  select(null);
+}
+
+/* ============================== 左侧对象列表 ============================== */
+function itemRow(label, obj, category, del){
+  const div=document.createElement('div');
+  div.className='item' + (sel && sel.obj===obj ? ' sel':'');
+  const nm=document.createElement('span'); nm.className='nm'; nm.textContent=label;
+  div.appendChild(nm);
+  div.onclick=()=>select(obj, category);
+  if(del){ const d=document.createElement('span'); d.className='del'; d.textContent='×'; d.onclick=(ev)=>{ ev.stopPropagation(); del(); }; div.appendChild(d); }
+  return div;
+}
+function addRow(opts, fn){
+  const div=document.createElement('div'); div.className='addrow';
+  const sel2=document.createElement('select');
+  for(const [v,l] of opts) { const o=document.createElement('option'); o.value=v; o.textContent=l; sel2.appendChild(o); }
+  const b=document.createElement('button'); b.textContent='+';
+  b.onclick=()=>fn(sel2.value);
+  div.appendChild(sel2); div.appendChild(b);
+  return div;
+}
+function renderList(){
+  const el=document.getElementById('list'); el.innerHTML='';
+  el.appendChild(itemRow('▣ 场景', doc, 'scenario'));
+  el.appendChild(Object.assign(document.createElement('h4'),{textContent:'地形'}));
+  (doc.terrain||[]).forEach((p,i)=>el.appendChild(itemRow(`${p.type} ${p.mat||''}${p.tag?' ['+p.tag+']':''}`, p, 'terrain', ()=>{beginEdit(); doc.terrain.splice(i,1); sel=null; rebuildAll();})));
+  el.appendChild(addRow(PRIM_TYPES.map(t=>[t,t]), (t)=>{ doc.terrain=doc.terrain||[]; const o=defaultPrim(t); beginEdit(); doc.terrain.push(o); select(o,'terrain'); rebuildAll(); }));
+  el.appendChild(Object.assign(document.createElement('h4'),{textContent:'区域'}));
+  (doc.zones||[]).forEach((z,i)=>el.appendChild(itemRow(`${z.name}`, z, 'zone', ()=>{beginEdit(); doc.zones.splice(i,1); sel=null; rebuildAll();})));
+  el.appendChild(addRow([['zone','区域']], ()=>{ doc.zones=doc.zones||[]; const o={name:'区域', rect:[-4,-4,4,4]}; beginEdit(); doc.zones.push(o); select(o,'zone'); rebuildAll(); }));
+  el.appendChild(Object.assign(document.createElement('h4'),{textContent:'座位'}));
+  (doc.seats||[]).forEach((s,i)=>el.appendChild(itemRow(`座位 ${i+1}`, s, 'seat', ()=>{beginEdit(); doc.seats.splice(i,1); sel=null; rebuildAll();})));
+  el.appendChild(addRow([['seat','座位']], ()=>{ doc.seats=doc.seats||[]; const o={origin:[0,0], yaw:0, budget:1000, max_units:70, deploy:[[-10,0,10,8]]}; beginEdit(); doc.seats.push(o); select(o,'seat'); rebuildAll(); }));
+  el.appendChild(Object.assign(document.createElement('h4'),{textContent:'道具'}));
+  (doc.props||[]).forEach((p,i)=>el.appendChild(itemRow(`${p.type}${p.tag?' ['+p.tag+']':''}`, p, 'prop', ()=>{beginEdit(); doc.props.splice(i,1); sel=null; rebuildAll();})));
+  el.appendChild(addRow(PROP_TYPES.map(t=>[t,t]), (t)=>{ doc.props=doc.props||[]; const o={type:t, x:0, y:0, z:0, r:t==='snowball'?1.5:0.6}; beginEdit(); doc.props.push(o); select(o,'prop'); rebuildAll(); }));
+  el.appendChild(Object.assign(document.createElement('h4'),{textContent:'敌军单位'}));
+  (doc.units||[]).forEach((u,i)=>{
+    const b=u.group||u; const lab=(u.group?'方阵 ':'')+(unitKindName(b.type))+(b.tag?' ['+b.tag+']':'');
+    el.appendChild(itemRow(lab, u, 'unit', ()=>{beginEdit(); doc.units.splice(i,1); sel=null; rebuildAll();}));
+  });
+  el.appendChild(addRow([['unit','单位'],['group','方阵']], (t)=>{ doc.units=doc.units||[]; const o= t==='group' ? {group:{type:'新兵',x:0,z:0,yaw:0,behavior:'default',rows:2,cols:6,dx:1.5,dz:1.4}} : {type:'新兵',x:0,z:0,yaw:0,behavior:'default'}; beginEdit(); doc.units.push(o); select(o,'unit'); rebuildAll(); }));
+  el.appendChild(Object.assign(document.createElement('h4'),{textContent:'目标'}));
+  const conds=[];
+  for(const k of ['win','lose']){ doc.objectives=doc.objectives||{}; (doc.objectives[k]||[]).forEach((c,i)=>conds.push([c,'cond',`${k} ${i+1}·${c.type}`, k, i])); }
+  conds.forEach(([c,cat,lab,k,i])=>el.appendChild(itemRow(lab, c, 'cond', ()=>{beginEdit(); doc.objectives[k].splice(i,1); sel=null; rebuildAll();})));
+  el.appendChild(addRow([['win','win 目标'],['lose','lose 目标']], (k)=>{ doc.objectives=doc.objectives||{}; doc.objectives[k]=doc.objectives[k]||[]; const o={type:'eliminate', team:1}; beginEdit(); doc.objectives[k].push(o); select(o,'cond'); rebuildAll(); }));
+}
+
+/* ============================== 属性表单 ============================== */
+const propsEl=document.getElementById('props');
+function renderForm(){
+  if(!sel){ propsEl.innerHTML='<div class="empty">未选中任何对象。点击左侧列表或 3D 场景里的物体。</div>'; return; }
+  propsEl.innerHTML='';
+  const h=document.createElement('h3'); h.textContent=sel.category==='scenario'?'场景':sel.category==='cond'?'目标条件':sel.category; propsEl.appendChild(h);
+  const fields = sel.category==='scenario' ? scenarioFields() :
+    sel.category==='terrain' ? terrainFields(sel.obj) :
+    sel.category==='zone' ? zoneFields() :
+    sel.category==='seat' ? seatFields() :
+    sel.category==='prop' ? propFields() :
+    sel.category==='unit' ? unitFields() :
+    sel.category==='cond' ? condFields() : [];
+  for(const f of fields) propsEl.appendChild(fieldRow(sel.obj, f));
+  formSnapshot = JSON.parse(JSON.stringify(doc));
+}
+
+function scenarioFields(){
+  return [
+    {k:'name',t:'str',label:'名称'}, {k:'mode',t:'enum',label:'模式',opts:MODES},
+    {k:'theme',t:'str',label:'主题'}, {k:'desc',t:'str',label:'描述'},
+    {k:'bounds',t:'vec',label:'边界 [x0,z0,x1,z1]',len:4},
+    {k:'time_limit',t:'num',label:'时限(秒)'}, {k:'kill_y',t:'num',label:'坠亡高度'},
+    {k:'on_timeout',t:'enum',label:'超时',opts:['lose','win']},
+    {k:'score_zone',t:'str',label:'计分区(名字)'},
+    {k:'water',t:'water',label:'水面'},
+  ];
+}
+function terrainFields(p){
+  let f=[{k:'type',t:'enum',label:'类型',opts:PRIM_TYPES},{k:'mat',t:'mat',label:'材质'},{k:'tag',t:'str',label:'标签'},{k:'boss_stun',t:'bool',label:'镇山兽撞上晕'}];
+  if(p.type==='box') f=f.concat([{k: p.c?'c':'min', t:'vec', label: p.c?'中心 c':'最小角 min', len:3}, {k: p.c?'h':'max', t:'vec', label: p.c?'半尺寸 h':'最大角 max', len:3}, {k:'yaw',t:'num',label:'yaw(度)'}]);
+  else if(p.type==='ramp') f=f.concat([{k:'from',t:'vec',label:'from[x,z]',len:2},{k:'to',t:'vec',label:'to[x,z]',len:2},{k:'width',t:'num',label:'宽'},{k:'h0',t:'num',label:'顶高0'},{k:'h1',t:'num',label:'顶高1'},{k:'base',t:'num',label:'底面高'}]);
+  else if(p.type==='cyl') f=f.concat([{k:'c',t:'vec',label:'中心[x,z]',len:2},{k:'r',t:'num',label:'半径'},{k:'y0',t:'num',label:'底y'},{k:'y1',t:'num',label:'顶y'},{k:'segs',t:'int',label:'分段'}]);
+  else if(p.type==='mound') f=f.concat([{k:'c',t:'vec',label:'中心[x,z]',len:2},{k:'r0',t:'num',label:'底半径'},{k:'r1',t:'num',label:'顶半径'},{k:'y0',t:'num',label:'底y'},{k:'y1',t:'num',label:'顶y'},{k:'segs',t:'int',label:'分段'}]);
+  else if(p.type==='hull') f=f.concat([{k:'pts',t:'list3',label:'顶点 [x,y,z]'}]);
+  else if(p.type==='forest') f=f.concat([{k:'min',t:'vec',label:'min[x,z]',len:2},{k:'max',t:'vec',label:'max[x,z]',len:2},{k:'spacing',t:'num',label:'间距'},{k:'r',t:'num',label:'树干半径'},{k:'h',t:'num',label:'树高'},{k:'y0',t:'num',label:'底y'}]);
+  return f;
+}
+function zoneFields(){ return [{k:'name',t:'str',label:'名字'},{k:'circle',t:'vec',label:'circle[cx,cz,r]',len:3,optional:true},{k:'rect',t:'vec',label:'rect[x0,z0,x1,z1]',len:4,optional:true},{k:'speed_mul',t:'num',label:'减速倍数'},{k:'stick_secs',t:'num',label:'带泥秒数'},{k:'score',t:'num',label:'计分/回合'},{k:'order',t:'int',label:'AAS顺序(-1=否)'}]; }
+function seatFields(){ return [{k:'origin',t:'vec',label:'origin[x,z]',len:2},{k:'yaw',t:'num',label:'yaw(度)'},{k:'budget',t:'num',label:'预算'},{k:'max_units',t:'int',label:'人数上限'},{k:'limits',t:'map',label:'限购(兵种→个数)'},{k:'lord',t:'lord',label:'主帅'},{k:'deploy',t:'list2',label:'布阵区[[x0,z0,x1,z1]]'}]; }
+function propFields(){ return [{k:'type',t:'enum',label:'类型',opts:PROP_TYPES},{k:'tag',t:'str',label:'标签'},{k:'team',t:'int',label:'所属方(-1中立)'},{k:'x',t:'num',label:'x'},{k:'y',t:'num',label:'y(-1自动)'},{k:'z',t:'num',label:'z'},{k:'r',t:'num',label:'半径'},{k:'hp',t:'num',label:'血量'},{k:'mass',t:'num',label:'质量'},{k:'push_secs',t:'num',label:'顶推秒数'},{k:'yaw',t:'num',label:'yaw(度)'},{k:'release_speed',t:'num',label:'滚下初速'},{k:'dmg_k',t:'num',label:'伤害系数'},{k:'dmg_max',t:'num',label:'伤害上限'},{k:'size',t:'vec',label:'size[x,y,z]',len:3,optional:true},{k:'boss_hits',t:'int',label:'撞几次碎'},{k:'breaks',t:'str',label:'炸掉的地形tag'},{k:'break_delay',t:'num',label:'炸毁延迟'}]; }
+function unitFields(){
+  const base = sel.obj.group || sel.obj;
+  const isGroup = !!sel.obj.group;
+  let f = isGroup ? [{k:'group.type',t:'kind',label:'兵种'},{k:'group.x',t:'num',label:'x'},{k:'group.z',t:'num',label:'z'},{k:'group.yaw',t:'num',label:'yaw(度)'},{k:'group.behavior',t:'enum',label:'行为',opts:BEHAVIORS},{k:'group.rows',t:'int',label:'排数'},{k:'group.cols',t:'int',label:'列数'},{k:'group.dx',t:'num',label:'列间距'},{k:'group.dz',t:'num',label:'排间距'}]
+    : [{k:'type',t:'kind',label:'兵种'},{k:'team',t:'int',label:'队伍'},{k:'x',t:'num',label:'x'},{k:'z',t:'num',label:'z'},{k:'y',t:'num',label:'y(-1自动)'},{k:'yaw',t:'num',label:'yaw(度)'},{k:'behavior',t:'enum',label:'行为',opts:BEHAVIORS},{k:'to',t:'vec',label:'to[x,z]',len:2,optional:true},{k:'to_tag',t:'str',label:'目标tag'},{k:'tag',t:'str',label:'标签'},{k:'delay',t:'num',label:'延迟秒'},{k:'hp',t:'num',label:'改血量(-1默认)'},{k:'route',t:'list2',label:'行军路线'},{k:'alt_route',t:'list2',label:'备用路线'},{k:'alt_trigger',t:'str',label:'改道触发tag'},{k:'alt_region',t:'vec',label:'改道区域',len:4,optional:true},{k:'rally_idx',t:'int',label:'集结点(-1否)'},{k:'rally_secs',t:'num',label:'集结秒'},{k:'rally_r',t:'num',label:'集结半径'},{k:'squad',t:'str',label:'小队名'},{k:'sortie',t:'bool',label:'守军出击'}];
+  return f;
+}
+function condFields(){ return [{k:'type',t:'enum',label:'类型',opts:COND_TYPES},{k:'team',t:'int',label:'队伍'},{k:'tag',t:'str',label:'tag'},{k:'zone',t:'str',label:'区域'},{k:'secs',t:'num',label:'持续秒'},{k:'count',t:'int',label:'数量'},{k:'unit_tag',t:'str',label:'单位tag'}]; }
+
+/* 字段路径取值/写值（支持 "group.x"） */
+function getPath(obj,k){ return k.split('.').reduce((o,p)=>o?.[p], obj); }
+function setPath(obj,k,v){ const parts=k.split('.'); let o=obj; for(let i=0;i<parts.length-1;i++){ if(o[parts[i]]==null) o[parts[i]]={}; o=o[parts[i]]; } o[parts[parts.length-1]]=v; }
+
+function fieldRow(obj, f){
+  const wrap=document.createElement('div'); wrap.className='fld';
+  const lab=document.createElement('label'); lab.textContent=f.label; wrap.appendChild(lab);
+  const commit=commitChange;
+  if(f.t==='str'||f.t==='mat'||f.t==='kind'){
+    const inp=document.createElement('input'); inp.type='text';
+    if(f.t==='mat'){ inp.setAttribute('list','matlist'); }
+    if(f.t==='kind'){ inp.setAttribute('list','kindlist'); }
+    inp.value=getPath(obj,f.k) ?? '';
+    inp.onchange=()=>{ setPath(obj,f.k,inp.value); commit(); };
+    wrap.appendChild(inp);
+  } else if(f.t==='num'||f.t==='int'){
+    const inp=document.createElement('input'); inp.type='number'; inp.step=f.t==='int'?'1':'any';
+    const v=getPath(obj,f.k); if(v!=null) inp.value=v;
+    inp.onchange=()=>{ const n=f.t==='int'?parseInt(inp.value):parseFloat(inp.value); setPath(obj,f.k,isNaN(n)?0:n); commit(); };
+    wrap.appendChild(inp);
+  } else if(f.t==='bool'){
+    const inp=document.createElement('input'); inp.type='checkbox'; inp.checked=!!getPath(obj,f.k);
+    inp.onchange=()=>{ setPath(obj,f.k,inp.checked); commit(); };
+    wrap.appendChild(inp);
+  } else if(f.t==='enum'){
+    const sel2=document.createElement('select');
+    for(const o of f.opts){ const op=document.createElement('option'); op.value=o; op.textContent=o; sel2.appendChild(op); }
+    const v=getPath(obj,f.k); sel2.value=f.opts.includes(v)?v:(f.opts[0]);
+    sel2.onchange=()=>{ setPath(obj,f.k,sel2.value); commit(); };
+    wrap.appendChild(sel2);
+  } else if(f.t==='vec'){
+    const arr=getPath(obj,f.k) || new Array(f.len).fill(0);
+    const box=document.createElement('div'); box.className='vec';
+    for(let i=0;i<f.len;i++){
+      const inp=document.createElement('input'); inp.type='number'; inp.step='any'; inp.value=arr[i]??0;
+      inp.onchange=()=>{ const a=getPath(obj,f.k)||[]; a[i]=parseFloat(inp.value)||0; setPath(obj,f.k,a); commit(); };
+      box.appendChild(inp);
+    }
+    wrap.appendChild(box);
+  } else if(f.t==='list2'){
+    const arr=getPath(obj,f.k)||[];
+    const box=document.createElement('div');
+    arr.forEach((p,i)=>{
+      const row=document.createElement('div'); row.className='row';
+      for(let j=0;j<2;j++){ const inp=document.createElement('input'); inp.type='number'; inp.step='any'; inp.value=p[j]??0; inp.onchange=()=>{ p[j]=parseFloat(inp.value)||0; commit(); }; row.appendChild(inp); }
+      const del=document.createElement('button'); del.textContent='×'; del.onclick=()=>{ const a=getPath(obj,f.k); a.splice(i,1); commit(); }; row.appendChild(del);
+      box.appendChild(row);
+    });
+    const add=document.createElement('button'); add.textContent='+ 点'; add.onclick=()=>{ const a=getPath(obj,f.k)||[]; a.push([0,0]); setPath(obj,f.k,a); commit(); }; box.appendChild(add);
+    wrap.appendChild(box);
+  } else if(f.t==='list3'){
+    const arr=getPath(obj,f.k)||[];
+    const box=document.createElement('div');
+    arr.forEach((p,i)=>{
+      const row=document.createElement('div'); row.className='row';
+      for(let j=0;j<3;j++){ const inp=document.createElement('input'); inp.type='number'; inp.step='any'; inp.value=p[j]??0; inp.onchange=()=>{ p[j]=parseFloat(inp.value)||0; commit(); }; row.appendChild(inp); }
+      const del=document.createElement('button'); del.textContent='×'; del.onclick=()=>{ const a=getPath(obj,f.k); a.splice(i,1); commit(); }; row.appendChild(del);
+      box.appendChild(row);
+    });
+    const add=document.createElement('button'); add.textContent='+ 点'; add.onclick=()=>{ const a=getPath(obj,f.k)||[]; a.push([0,0,0]); setPath(obj,f.k,a); commit(); }; box.appendChild(add);
+    wrap.appendChild(box);
+  } else if(f.t==='map'){
+    const box=document.createElement('div');
+    const m=getPath(obj,f.k)||{};
+    for(const [k,v] of Object.entries(m)){
+      const row=document.createElement('div'); row.className='row';
+      const sel3=document.createElement('select'); for(const [id,zh] of KINDS){ const o=document.createElement('option'); o.value=zh; o.textContent=zh; sel3.appendChild(o); } sel3.value=k;
+      sel3.onchange=()=>{ const mm=getPath(obj,f.k)||{}; const vv=mm[k]; delete mm[k]; mm[sel3.value]=vv; setPath(obj,f.k,mm); commit(); };
+      const inp=document.createElement('input'); inp.type='number'; inp.step='1'; inp.value=v;
+      inp.onchange=()=>{ const mm=getPath(obj,f.k)||{}; mm[k]=parseInt(inp.value)||0; setPath(obj,f.k,mm); commit(); };
+      const del=document.createElement('button'); del.textContent='×'; del.onclick=()=>{ const mm=getPath(obj,f.k)||{}; delete mm[k]; setPath(obj,f.k,mm); commit(); };
+      row.appendChild(sel3); row.appendChild(inp); row.appendChild(del); box.appendChild(row);
+    }
+    const add=document.createElement('button'); add.textContent='+ 兵种'; add.onclick=()=>{ const mm=getPath(obj,f.k)||{}; mm['新兵']=0; setPath(obj,f.k,mm); commit(); }; box.appendChild(add);
+    wrap.appendChild(box);
+  } else if(f.t==='water'){
+    wrap.appendChild(waterForm());
+  } else if(f.t==='lord'){
+    const sub=document.createElement('div'); sub.className='sub';
+    const sl=document.createElement('label'); sl.textContent='主帅'; sub.appendChild(sl);
+    const obj2=getPath(obj,'lord')||{}; setPath(obj,'lord',obj2);
+    for(const ff of [{k:'x',t:'num',label:'x'},{k:'z',t:'num',label:'z'},{k:'yaw',t:'num',label:'yaw(度)'}]){
+      sub.appendChild(fieldRow(obj2, ff));
+    }
+    const rm=document.createElement('button'); rm.textContent='移除主帅'; rm.onclick=()=>{ delete obj.lord; commit(); }; sub.appendChild(rm);
+    wrap.appendChild(sub);
+  }
+  return wrap;
+}
+
+function waterForm(){
+  const wrap=document.createElement('div'); wrap.className='sub';
+  doc.water=doc.water||{level:-0.6};
+  const mode=document.createElement('select');
+  const o1=document.createElement('option'); o1.value='static'; o1.textContent='固定水面'; mode.appendChild(o1);
+  const o2=document.createElement('option'); o2.value='tide'; o2.textContent='潮水'; mode.appendChild(o2);
+  mode.value=doc.water.tide?'tide':'static';
+  mode.onchange=()=>{ if(mode.value==='tide'){ doc.water={tide:{t0:20,t1:75,h0:0,h1:4}}; } else { doc.water={level:-0.6}; } commitChange(); };
+  wrap.appendChild(mode);
+  if(doc.water.tide){
+    const t=doc.water.tide;
+    for(const ff of [{k:'t0',label:'开始秒'},{k:'t1',label:'结束秒'},{k:'h0',label:'起始高'},{k:'h1',label:'结束高'}]){
+      const r=document.createElement('div'); r.className='row';
+      const l=document.createElement('label'); l.textContent=ff.label; l.style.cssText='width:60px;color:var(--muted);font-size:11px';
+      const inp=document.createElement('input'); inp.type='number'; inp.step='any'; inp.value=t[ff.k];
+      inp.onchange=()=>{ t[ff.k]=parseFloat(inp.value)||0; commitChange(); };
+      r.appendChild(l); r.appendChild(inp); wrap.appendChild(r);
+    }
+  } else {
+    const r=document.createElement('div'); r.className='row';
+    const l=document.createElement('label'); l.textContent='水面高'; l.style.cssText='width:60px;color:var(--muted);font-size:11px';
+    const inp=document.createElement('input'); inp.type='number'; inp.step='any'; inp.value=doc.water.level;
+    inp.onchange=()=>{ doc.water.level=parseFloat(inp.value)||0; commitChange(); };
+    r.appendChild(l); r.appendChild(inp); wrap.appendChild(r);
+  }
+  return wrap;
+}
+
+/* ============================== 新增默认值 ============================== */
+function defaultPrim(t){
+  switch(t){
+    case 'box': return {type:'box', min:[-2,0,-2], max:[2,1,2], mat:'stone'};
+    case 'ramp': return {type:'ramp', from:[0,0], to:[4,0], width:4, h0:0, h1:1, base:-1, mat:'wood'};
+    case 'cyl': return {type:'cyl', c:[0,0], r:0.5, y0:-0.5, y1:3, segs:8, mat:'tree'};
+    case 'mound': return {type:'mound', c:[0,0], r0:5, r1:2, y0:0, y1:3, segs:32, mat:'grass_hill'};
+    case 'hull': return {type:'hull', mat:'rock', pts:[[0,0,0],[2,0,0],[2,0,2],[0,0,2],[1,2,1]]};
+    case 'forest': return {type:'forest', min:[-5,-5], max:[5,5], spacing:3, r:0.35, h:5, y0:-0.5, mat:'tree'};
+  }
+}
+
+/* ============================== 加载/保存 ============================== */
+function toast(msg, isErr){ const t=document.getElementById('toast'); t.textContent=msg; t.className=isErr?'err show':'show'; setTimeout(()=>t.className='',2000); }
+
+async function listFiles(){
+  const sel=document.getElementById('fileSel'); sel.innerHTML='';
+  try{
+    const r=await fetch('/api/list'); const d=await r.json();
+    for(const kind of ['maps','levels']){
+      const og=document.createElement('optgroup'); og.label=kind;
+      for(const m of d[kind]){ const o=document.createElement('option'); o.value=m.file; o.textContent=`${kind==='maps'?'地图':'关卡'} · ${m.name}`; og.appendChild(o); }
+      sel.appendChild(og);
+    }
+  }catch(e){ toast('无法连接服务器（可只用上传/下载）', true); }
+}
+async function loadFile(file){
+  const r=await fetch('/api/read?file='+encodeURIComponent(file));
+  if(!r.ok){ toast('加载失败', true); return; }
+  const j=await r.json();
+  doc=j; currentFile=file; sel=null; undoStack.length=0; redoStack.length=0;
+  rebuildAll();
+  document.getElementById('stFile').textContent=file;
+  toast('已加载 '+file);
+}
+async function saveFile(file){
+  const r=await fetch('/api/write?file='+encodeURIComponent(file), {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(doc)});
+  const d=await r.json();
+  if(r.ok){ currentFile=file; document.getElementById('stFile').textContent=file; toast('已保存 '+file); }
+  else toast('保存失败：'+(d.error||''), true);
+}
+function download(){
+  const blob=new Blob([JSON.stringify(doc,null,1)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=(currentFile?currentFile.split('/').pop():'map.json'); a.click();
+}
+function newDoc(){ doc={name:'新地图', mode:'duel', theme:'', desc:'', bounds:[-40,-30,40,30], time_limit:90, kill_y:-3, on_timeout:'lose', terrain:[], zones:[], seats:[{origin:[0,-25],yaw:0,deploy:[[-16,0,16,11]],budget:1000,max_units:70},{origin:[0,25],yaw:180,deploy:[[-16,0,16,11]],budget:1000,max_units:70}]}; currentFile=null; sel=null; undoStack.length=0; redoStack.length=0; rebuildAll(); document.getElementById('stFile').textContent='未保存'; toast('新建'); }
+
+/* ============================== 事件绑定 ============================== */
+document.getElementById('btnLoad').onclick=()=>{ const f=document.getElementById('fileSel').value; if(f) loadFile(f); };
+document.getElementById('btnSave').onclick=()=>{ if(!doc) return; if(!currentFile){ const f=document.getElementById('fileSel').value; if(!f){ toast('先选一个文件或另存为',true); return; } saveFile(f); } else saveFile(currentFile); };
+document.getElementById('btnSaveAs').onclick=()=>{ const f=document.getElementById('fileSel').value; if(!f){ toast('在左侧下拉框选目标文件',true); return; } saveFile(f); };
+document.getElementById('btnDownload').onclick=()=>{ if(doc) download(); };
+document.getElementById('btnUpload').onclick=()=>document.getElementById('fileIn').click();
+document.getElementById('fileIn').onchange=(e)=>{ const f=e.target.files[0]; if(!f) return; f.text().then(t=>{ doc=JSON.parse(t); currentFile=null; sel=null; undoStack.length=0; redoStack.length=0; rebuildAll(); document.getElementById('stFile').textContent=f.name+' (本地)'; toast('已导入 '+f.name); }); };
+document.getElementById('btnUndo').onclick=undo;
+document.getElementById('btnRedo').onclick=redo;
+document.getElementById('btnView').onclick=()=>{ camera.position.set(45,55,60); orbit.target.set(0,0,0); orbit.update(); };
+document.getElementById('ckGrid').onchange=(e)=>grid.visible=e.target.checked;
+document.getElementById('ckTrees').onchange=()=>rebuildAll();
+document.getElementById('ckMoveY').onchange=()=>{ if(selMesh) selectMesh(selMesh); };
+
+let downX=0, downY=0;
+renderer.domElement.addEventListener('pointerdown',(e)=>{ downX=e.clientX; downY=e.clientY; });
+renderer.domElement.addEventListener('pointerup',(e)=>{ if(e.button===0 && !tx.dragging && Math.hypot(e.clientX-downX, e.clientY-downY) < 4) selectByRay(e); });
+window.addEventListener('keydown',(e)=>{
+  if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT'||e.target.tagName==='TEXTAREA') return;
+  if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z'){ e.preventDefault(); e.shiftKey?redo():undo(); }
+  else if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='y'){ e.preventDefault(); redo(); }
+  else if(e.key==='Delete'||e.key==='Backspace'){ if(sel && sel.category!=='scenario'){ deleteSelected(); } }
+  else if(e.key==='Escape'){ select(null); }
+});
+function deleteSelected(){
+  if(!sel) return;
+  const o=sel.obj;
+  beginEdit();
+  const idxOf=(arr)=>arr.indexOf(o);
+  if(sel.category==='terrain') doc.terrain.splice(idxOf(doc.terrain),1);
+  else if(sel.category==='zone') doc.zones.splice(idxOf(doc.zones),1);
+  else if(sel.category==='seat') doc.seats.splice(idxOf(doc.seats),1);
+  else if(sel.category==='prop') doc.props.splice(idxOf(doc.props),1);
+  else if(sel.category==='unit') doc.units.splice(idxOf(doc.units),1);
+  else if(sel.category==='cond'){ for(const k of ['win','lose']) if(doc.objectives && doc.objectives[k]){ const i=doc.objectives[k].indexOf(o); if(i>=0){ doc.objectives[k].splice(i,1); break; } } }
+  sel=null; rebuildAll();
+}
+
+/* ============================== 材质 datalist ============================== */
+const dl1=document.createElement('datalist'); dl1.id='matlist'; for(const m of MATS){ const o=document.createElement('option'); o.value=m; dl1.appendChild(o); } document.body.appendChild(dl1);
+const dl2=document.createElement('datalist'); dl2.id='kindlist'; for(const [id,zh] of KINDS){ for(const v of [zh,id]){ const o=document.createElement('option'); o.value=v; dl2.appendChild(o); } } document.body.appendChild(dl2);
+
+/* ============================== 渲染循环 ============================== */
+function animate(){ requestAnimationFrame(animate); orbit.update(); renderer.render(scene,camera); }
+window.addEventListener('resize',()=>{ camera.aspect=viewport.clientWidth/viewport.clientHeight; camera.updateProjectionMatrix(); renderer.setSize(viewport.clientWidth,viewport.clientHeight); });
+
+/* 启动 */
+newDoc();
+listFiles().then(()=>{
+  const q=new URLSearchParams(location.search).get('load');
+  if(q) loadFile(q);
+});
+animate();
+</script>
+</body>
+</html>
