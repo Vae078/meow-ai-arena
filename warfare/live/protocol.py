@@ -180,6 +180,18 @@ class Ghost:
         self.step = 0
 
 
+class Squad:
+    """组（squad）：LLM 的最小指挥单位。"""
+    def __init__(self):
+        self.id = 0          # 组 id（squad_move 等指令用）
+        self.kind = 0        # 兵种编号
+        self.seat = -1       # 座位（== init.seat 是己方组）
+        self.alive = 0       # 组内活兵数
+        self.x = 0.0         # 组中心（本地坐标）
+        self.z = 0.0
+        self.ord = 0         # 组状态：0 自由 1 驻守 2 移动 3 攻击
+
+
 class TickState:
     def __init__(self):
         self.tick = 0
@@ -194,6 +206,7 @@ class TickState:
         self.score = []       # 每队据点累计得分
         self.res = []         # 每队 ticket / 兵力
         self.caps = []        # AAS 顺序占点：[(归属, 占领进度步)]
+        self.squads = []      # list[Squad]
 
 
 def _readline(fin):
@@ -425,6 +438,21 @@ def parse_tick(fin, init):
         f.vy = v[5] / 100.0
         f.land_x, f.land_z = init.to_local(v[7] / 100.0, v[8] / 100.0)
         st.flying.append(f)
+
+    # Q 组状态：组 id 兵种 人数 中心x(cm) 中心z(cm) 状态
+    line = _readline(fin)
+    n = int(line[2:])
+    for _ in range(n):
+        l = _readline(fin)
+        v = [int(x) for x in l.split()]
+        sq = Squad()
+        sq.id = v[0]
+        sq.kind = v[1]
+        sq.seat = v[2]
+        sq.alive = v[3]
+        sq.x, sq.z = init.to_local(v[4] / 100.0, v[5] / 100.0)
+        sq.ord = v[6]
+        st.squads.append(sq)
 
     _readline(fin)  # "E"
     return st

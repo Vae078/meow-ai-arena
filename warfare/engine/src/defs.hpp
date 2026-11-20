@@ -89,6 +89,16 @@ inline int squad_size(int kind) {
     }
 }
 
+// 组（squad）：数值层的最小单位。组价 = 满编人数 × 单兵造价。
+struct SquadDef {
+    int size;    // 组内人数
+    float cost;  // 组价
+};
+inline SquadDef squad_def(int kind) {
+    const int n = squad_size(kind);
+    return {n, n * DEFS[kind].cost};
+}
+
 // AAS 顺序占点
 constexpr float CAP_SECS = 10.0f;    // 人数优势持续多久才占下
 constexpr float CAP_REWARD = 400.0f; // 首次占下新点的 ticket 奖励

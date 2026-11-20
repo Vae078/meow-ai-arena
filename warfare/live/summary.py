@@ -73,24 +73,42 @@ def build_summary(init, st):
         else:
             lines.append("目标：达成本关过关条件。")
 
-    # 我方
-    mine = [u for u in st.units if u.alive and u.mine]
-    enemy = [u for u in st.units if u.alive and not u.mine]
-    cost = sum(init.defs[u.kind].cost for u in mine if u.kind in init.defs)
-    mgroups = _group_by_kind(mine)
-    lines.append(f"我方 {len(mgroups)} 组（共 {len(mine)} 人，造价 {cost:.0f}）：")
-    for kind, units in mgroups.items():
-        lines.append(_squad_line(kind, units))
-    if not mine:
-        lines.append("  （已全灭）")
-
-    # 敌方（迷雾：只列可见的）
-    egroups = _group_by_kind(enemy)
-    lines.append(f"敌方可见 {len(egroups)} 组（共 {len(enemy)} 人）：")
-    for kind, units in egroups.items():
-        lines.append(_squad_line(kind, units))
-    if not enemy:
-        lines.append("  （无可见敌人，最后目击见下）")
+    # 我方 / 敌方（优先用引擎的组实体 st.squads，组 id 可直接指挥）
+    ORD_ZH = ["自由", "驻守", "移动", "攻击"]
+    if st.squads:
+        mine_sq = [sq for sq in st.squads if sq.seat == init.seat]
+        enemy_sq = [sq for sq in st.squads if sq.seat != init.seat]
+        def sq_line(sq):
+            en = P.KIND_EN[sq.kind] if 0 <= sq.kind < len(P.KIND_EN) else str(sq.kind)
+            zh = squads.kind_zh(en)
+            st2 = ORD_ZH[sq.ord] if 0 <= sq.ord < len(ORD_ZH) else ""
+            return f"  #{sq.id} {en}({zh}) {sq.alive}人 中心({sq.x:.1f},{sq.z:.1f}) {st2}"
+        lines.append(f"我方 {len(mine_sq)} 组：")
+        for sq in mine_sq:
+            lines.append(sq_line(sq))
+        if not mine_sq:
+            lines.append("  （已全灭）")
+        lines.append(f"敌方可见 {len(enemy_sq)} 组：")
+        for sq in enemy_sq:
+            lines.append(sq_line(sq))
+        if not enemy_sq:
+            lines.append("  （无可见敌人，最后目击见下）")
+    else:
+        mine = [u for u in st.units if u.alive and u.mine]
+        enemy = [u for u in st.units if u.alive and not u.mine]
+        cost = sum(init.defs[u.kind].cost for u in mine if u.kind in init.defs)
+        mgroups = _group_by_kind(mine)
+        lines.append(f"我方 {len(mgroups)} 组（共 {len(mine)} 人，造价 {cost:.0f}）：")
+        for kind, units in mgroups.items():
+            lines.append(_squad_line(kind, units))
+        if not mine:
+            lines.append("  （已全灭）")
+        egroups = _group_by_kind(enemy)
+        lines.append(f"敌方可见 {len(egroups)} 组（共 {len(enemy)} 人）：")
+        for kind, units in egroups.items():
+            lines.append(_squad_line(kind, units))
+        if not enemy:
+            lines.append("  （无可见敌人，最后目击见下）")
 
     # 最后目击（迷雾里看不见的敌方单位）
     if st.ghosts:
@@ -134,17 +152,14 @@ def build_summary(init, st):
 
 DEFAULT_SYSTEM_PROMPT = """你是《纸上谈兵》的指挥官，指挥一队士兵（分成若干组）和另一队 AI 对战。
 
-坐标系：本地视角，x 向右、z 朝敌人，单位米，原点在你的布阵区。每回合（8 秒）收到一次战报，按「组」列出（兵种英文名/中文名/人数/中心坐标/状态）。请给出指令，每行一条，可选：
-  move <兵种> <x> <z>       整组走到某点（编队、自动绕路）
-  attack <兵种> <目标>      整组追打（目标可以是兵种英文名或编号）
-  hold <兵种>               整组原地守（长枪兵站定架枪）
-  free <兵种>               整组自由行动（默认行为）
-  aim <兵种> <x> <z>        整组朝地点盲射（弓手/投石车）
-  detonate <兵种>           整组引爆（炮仗兵）
-  push <兵种> <雪球编号>     整组推雪球
-  buy <兵种>                花增援点在基地买一整组（满编）
+坐标系：本地视角，x 向右、z 朝敌人，单位米，原点在你的布阵区。每回合（8 秒）收到一次战报，按「组」列出（组id/兵种/人数/中心/状态）。指令对「组」下，用战报里的组 id（#数字），可选：
+  squad_move <组id> <x> <z>      整组走到某点（组内自动编队）
+  squad_attack <组id> <目标组id> 整组追打目标组（组内自动分配目标）
+  squad_hold <组id>              整组原地守（长枪兵架枪）
+  squad_free <组id>              整组自由行动（默认行为）
+  buy <兵种>                     花 ticket 在基地买一整组
 
-「兵种」用英文名：militia(新兵) shield(盾卫) spear(长枪兵) archer(弓手) cavalry(骑兵) hammer(大锤) bomber(炮仗兵) catapult(投石车) giant(大块头) boss(镇山兽) lord(主帅)；也可以填单个兵编号精确指挥。
+「组id」看战报「我方 N 组」下的 #数字；buy 的兵种用英文名：militia(新兵) shield(盾卫) spear(长枪兵) archer(弓手) cavalry(骑兵) hammer(大锤) bomber(炮仗兵) catapult(投石车) giant(大块头)。也可对单个兵编号用 move/attack/aim/detonate/push 微操。
 
 要点：顺序占点（只能占与自己已占点相邻的点，占点要派兵站进去守够时间）、守住前线点、集火残血、骑兵冲弓手、枪兵顶骑兵、弓手远离近战。没提到的组保持现状。
 

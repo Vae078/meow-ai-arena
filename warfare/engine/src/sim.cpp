@@ -164,6 +164,7 @@ struct Unit {
     int rallyIdx = -1, rallyDeadline = 0;  // 备用路线上的集结点（第几个路点）、最晚等到第几步
     float rallyR = 8, rallySecs = 0;
     std::string squad;             // 主办方守军的队名（出击按队）
+    int squadId = -1;              // 所属组 id（-1 = 无组：主帅/守军单兵）
     bool sortie = false;            // 原地守时挨了够不着的远程攻击，全队出击
     // 镇山兽
     int bstate = 0, btimer = 0;   // 0 游走 1 刨地 2 冲撞 3 晕
@@ -174,6 +175,15 @@ struct Unit {
     int pathAge = 1000000;
     int phase = 0;  // 定期重新找目标、重算路径的错峰序号：选手的兵按"在自己这一方里排第几"，和座位无关
     bool alive() const { return st == S_STAND || st == S_KNOCK || st == S_GETUP; }
+};
+
+// 组（squad）：持久实体，LLM/桥接的最小指挥单位。组内兵仍是独立刚体，由组控制器协调。
+struct Squad {
+    int id = -1;               // 组 id（squads 下标）
+    int seat = -1, kind = 0;
+    std::vector<int> members;  // 组内兵的 U 下标
+    Order ord;                 // 组级意图（O_MOVE/O_ATTACK/O_HOLD/O_FREE）
+    int targetSquad = -1;      // 攻击的目标组 id
 };
 
 enum PropType { PT_SNOWBALL = 0, PT_KEG = 1, PT_FLAG = 2, PT_BARRIER = 3, PT_GATE = 4, PT_PILLAR = 5 };
@@ -244,6 +254,7 @@ struct World::Impl {
     std::unique_ptr<JobSystem> js;
 
     std::vector<Unit> U;
+    std::vector<Squad> squads;
     std::vector<Prop> P;
     std::vector<Stone> S;
     std::vector<Arrow> A;
@@ -598,6 +609,7 @@ struct World::Impl {
         killCost.assign(size_t(nteams), 0);
         lostCost.assign(size_t(nteams), 0);
         elimStep.assign(size_t(nteams), -1);
+        res.assign(size_t(nteams), 0.0f);  // ticket 初始 0，靠首占 +400 累积（须在 applyOrders 前初始化，否则 buy 被误忽略）
         for (auto& u : U) {
             if (u.team >= nteams) continue;
             startCost[size_t(u.team)] += u.cost;
@@ -2473,14 +2485,21 @@ struct World::Impl {
         const SeatDef& S0 = sc.seats[size_t(seat)];
         const int n = squad_size(kind);
         const int side = std::max(1, int(std::sqrt(float(n))));
+        Squad sq;
+        sq.id = int(squads.size());
+        sq.seat = seat;
+        sq.kind = kind;
         for (int i = 0; i < n; ++i) {
             const int r = i / side, c = i % side;
             const float dx = (c - (side - 1) * 0.5f) * 1.5f;
             const float dz = (r - (side - 1) * 0.5f) * 1.5f;
             float wx, wz;
             S0.to_world(dx, dz, wx, wz);
-            addUnit(kind, seat, seat, wx, wz, S0.yaw, -1000, "");
+            const int idx = addUnit(kind, seat, seat, wx, wz, S0.yaw, -1000, "");
+            U[size_t(idx)].squadId = sq.id;
+            sq.members.push_back(idx);
         }
+        squads.push_back(sq);
     }
 
     void checkEnd() {
@@ -3018,6 +3037,35 @@ struct World::Impl {
         putInt(o, ns);
         o += '\n';
         o += ss;
+        // Q 组状态：组 id 兵种 人数 中心x(cm) 中心z(cm) 状态(ord.t)
+        int nq = 0;
+        std::string qs;
+        for (const Squad& sq : squads) {
+            int alive = 0;
+            float cx = 0, cz = 0;
+            for (int idx : sq.members) {
+                const Unit& u = U[size_t(idx)];
+                if (!u.alive()) continue;
+                const RVec3 p = bi->GetPosition(u.body);
+                cx += float(p.GetX()); cz += float(p.GetZ());
+                ++alive;
+            }
+            if (alive == 0) continue;
+            cx /= float(alive); cz /= float(alive);
+            putInt(qs, sq.id); qs += ' ';
+            putInt(qs, sq.kind); qs += ' ';
+            putInt(qs, sq.seat); qs += ' ';
+            putInt(qs, alive); qs += ' ';
+            putInt(qs, cm(cx)); qs += ' ';
+            putInt(qs, cm(cz)); qs += ' ';
+            putInt(qs, sq.ord.t);
+            qs += '\n';
+            ++nq;
+        }
+        o += "Q ";
+        putInt(o, nq);
+        o += '\n';
+        o += qs;
         o += "E\n";
         return o;
     }
@@ -3042,16 +3090,23 @@ struct World::Impl {
         for (;;) {
             skipws();
             if (!*c) break;
-            const char k = *c++;
-            if (*c && *c != ' ' && *c != '\t') return std::string("看不懂的指令 ") + k;
+            char k = *c++;
+            if (*c && *c != ' ' && *c != '\t') {
+                // 组级指令：G 后跟 M/A/H/F（组移动/组攻击/组驻守/组自由）
+                if (k == 'G' && (*c == 'M' || *c == 'A' || *c == 'H' || *c == 'F')) {
+                    const char k2 = *c++;
+                    k = (k2 == 'M') ? 'm' : (k2 == 'A') ? 'a' : (k2 == 'H') ? 'h' : 'f';
+                    if (*c && *c != ' ' && *c != '\t') return std::string("看不懂的指令 G") + k2;
+                } else return std::string("看不懂的指令 ") + k;
+            }
             Op op{k, 0, 0, 0};
             if (!readInt(op.id)) return std::string("指令 ") + k + " 缺编号";
-            if (k == 'M' || k == 'L' || k == 'P') {
+            if (k == 'M' || k == 'L' || k == 'P' || k == 'm') {
                 if (!readInt(op.a) || !readInt(op.b)) return std::string("指令 ") + k + " 缺坐标";
                 if (std::llabs(op.a) > 100000000 || std::llabs(op.b) > 100000000) return "坐标太大";
-            } else if (k == 'A' || k == 'U') {
+            } else if (k == 'A' || k == 'U' || k == 'a') {
                 if (!readInt(op.a)) return std::string("指令 ") + k + " 缺目标编号";
-            } else if (k != 'H' && k != 'F' && k != 'D' && k != 'B') return std::string("看不懂的指令 ") + k;
+            } else if (k != 'H' && k != 'F' && k != 'D' && k != 'B' && k != 'h' && k != 'f') return std::string("看不懂的指令 ") + k;
             ops.push_back(op);
             if (ops.size() > 5000) return "一回合的指令太多";
         }
@@ -3066,11 +3121,84 @@ struct World::Impl {
         for (const Op& op : ops) {
             if (op.k == 'B') {  // 买组：B <兵种>，不是对某个兵下令
                 const int kind = int(op.id);
-                if (kind < 0 || kind >= NKIND || squad_size(kind) <= 0) { ++ignored; continue; }
-                const float cost = squad_size(kind) * DEFS[kind].cost;
-                if (seat < 0 || seat >= int(res.size()) || res[size_t(seat)] < cost) { ++ignored; continue; }
-                res[size_t(seat)] -= cost;
+                if (kind < 0 || kind >= NKIND) { ++ignored; continue; }
+                const SquadDef sd = squad_def(kind);
+                if (sd.size <= 0) { ++ignored; continue; }
+                if (seat < 0 || seat >= int(res.size()) || res[size_t(seat)] < sd.cost) { ++ignored; continue; }
+                res[size_t(seat)] -= sd.cost;
                 spawnSquad(seat, kind);
+                continue;
+            }
+            // 组级指令：m=GM 组移动 a=GA 组攻击 h=GH 组驻守 f=GF 组自由（扇出成组内兵指令）
+            if (op.k == 'm' || op.k == 'a' || op.k == 'h' || op.k == 'f') {
+                const int sqId = int(op.id);
+                if (sqId < 0 || sqId >= int(squads.size())) { ++ignored; continue; }
+                Squad& sq = squads[size_t(sqId)];
+                if (sq.seat != seat) { ++ignored; continue; }
+                if (op.k == 'm') {  // 组移动到 (x,z)，组内按方阵展开
+                    const float cx = float(op.a) / 100.0f, cz = float(op.b) / 100.0f;
+                    sq.ord = Order();
+                    sq.ord.t = O_MOVE;
+                    sq.ord.x = cx; sq.ord.z = cz;
+                    const int n = int(sq.members.size());
+                    const int side = std::max(1, int(std::sqrt(float(n))));
+                    for (int i = 0; i < n; ++i) {
+                        Unit& u = U[size_t(sq.members[size_t(i)])];
+                        if (!u.alive()) continue;
+                        const int r = i / side, c = i % side;
+                        u.ord = Order();
+                        u.ord.t = O_MOVE;
+                        u.ord.x = cx + (c - (side - 1) * 0.5f) * 1.5f;
+                        u.ord.z = cz + (r - (side - 1) * 0.5f) * 1.5f;
+                        u.pathAge = 1000000;
+                    }
+                } else if (op.k == 'a') {  // 组攻击目标组，组内就近分配目标
+                    const int tgtSq = int(op.a);
+                    if (tgtSq < 0 || tgtSq >= int(squads.size())) { ++ignored; continue; }
+                    const Squad& tgt = squads[size_t(tgtSq)];
+                    sq.ord = Order();
+                    sq.ord.t = O_ATTACK;
+                    sq.targetSquad = tgtSq;
+                    std::vector<int> tids;
+                    for (int ti : tgt.members) if (U[size_t(ti)].alive()) tids.push_back(U[size_t(ti)].id);
+                    for (int idx : sq.members) {
+                        Unit& u = U[size_t(idx)];
+                        if (!u.alive()) continue;
+                        if (tids.empty()) { u.ord = Order(); continue; }
+                        const RVec3 up = bi->GetPosition(u.body);
+                        int best = tids[0];
+                        float bd = 1e30f;
+                        for (int tid : tids) {
+                            const Unit& tu = U[size_t(objs[size_t(tid)].idx)];
+                            const RVec3 tp = bi->GetPosition(tu.body);
+                            const float dx = float(tp.GetX() - up.GetX()), dz = float(tp.GetZ() - up.GetZ());
+                            const float d = dx * dx + dz * dz;
+                            if (d < bd) { bd = d; best = tid; }
+                        }
+                        u.ord = Order();
+                        u.ord.t = O_ATTACK;
+                        u.ord.target = best;
+                        u.pathAge = 1000000;
+                    }
+                } else if (op.k == 'h') {  // 组驻守
+                    sq.ord = Order();
+                    sq.ord.t = O_HOLD;
+                    for (int idx : sq.members) {
+                        Unit& u = U[size_t(idx)];
+                        if (!u.alive()) continue;
+                        const RVec3 pp = bi->GetPosition(u.body);
+                        if (u.ord.t != O_HOLD) { u.postX = float(pp.GetX()); u.postZ = float(pp.GetZ()); }
+                        u.ord = Order();
+                        u.ord.t = O_HOLD;
+                    }
+                } else {  // 组自由
+                    sq.ord = Order();
+                    for (int idx : sq.members) {
+                        Unit& u = U[size_t(idx)];
+                        if (!u.alive()) continue;
+                        u.ord = Order();
+                    }
+                }
                 continue;
             }
             if (op.id <= 0 || op.id >= (long long)objs.size() || objs[size_t(op.id)].type != OT_UNIT) { ++ignored; continue; }

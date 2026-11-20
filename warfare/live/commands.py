@@ -15,7 +15,8 @@ LLM 输出：先写决策思路（中文，若干行），再逐行输出指令�
 import protocol as P
 import squads
 
-COMMAND_OPS = {"move", "movestraight", "attack", "hold", "free", "aim", "detonate", "push", "buy"}
+COMMAND_OPS = {"move", "movestraight", "attack", "hold", "free", "aim", "detonate", "push", "buy",
+               "squad_move", "squad_attack", "squad_hold", "squad_free"}
 
 
 def parse_llm(text, tick, init):
@@ -119,6 +120,17 @@ def parse_llm(text, tick, init):
                     errors.append(f"buy: 不认识的兵种 {s}")
                     continue
                 tokens.append(f"B {P.KIND_EN.index(s)}")
+            elif op == "squad_move":
+                sq = int(parts[1])
+                x, z = float(parts[2]), float(parts[3])
+                wx, wz = init.to_world(x, z)
+                tokens.append(f"GM {sq} {round(wx * 100)} {round(wz * 100)}")
+            elif op == "squad_attack":
+                tokens.append(f"GA {int(parts[1])} {int(parts[2])}")
+            elif op == "squad_hold":
+                tokens.append(f"GH {int(parts[1])}")
+            elif op == "squad_free":
+                tokens.append(f"GF {int(parts[1])}")
         except (ValueError, IndexError):
             errors.append(f"解析失败：{line}")
     return tokens, errors, reasoning
